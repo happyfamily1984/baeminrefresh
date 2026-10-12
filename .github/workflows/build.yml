@@ -14,10 +14,10 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build release APK
+        run: ./gradlew assembleRelease --stacktrace
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk BaeminRefresh.apk
+        run: cp app/build/outputs/apk/release/app-release.apk BaeminRefresh.apk
       - uses: actions/upload-artifact@v4
         with:
           name: BaeminRefresh-apk
