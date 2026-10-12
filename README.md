@@ -69,4 +69,12 @@ Play 스토어 밖에서 받은 앱이 접근성 기능을 쓰면, 구글 Play �
 
 요구 사항: JDK 17, Android SDK (compileSdk 35). 최소 지원 버전 Android 8.0 (API 26).
 
-빌드 서명에는 저장소의 `app/debug.keystore`를 사용하므로, 새 버전 APK를 기존 앱 위에 바로 덮어 설치할 수 있습니다.
+### 서명 키
+
+배포용 APK는 저장소에 없는 별도 키로 서명합니다. CI는 GitHub Secret 두 개를 사용합니다.
+
+- `SIGNING_KEYSTORE_BASE64`: 키 파일(alias `baeminrefresh`)을 base64로 인코딩한 값
+- `SIGNING_PASSWORD`: 키 비밀번호
+
+키 파일을 잃어버리면 이미 설치한 사람들은 앱을 지우고 다시 설치해야 하므로, 키 파일은 따로 안전하게 보관하세요.
+로컬에서 키 없이 빌드하면 개인 디버그 키로 서명됩니다.

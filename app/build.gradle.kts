@@ -11,27 +11,33 @@ android {
         applicationId = "com.baeminrefresh.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
     }
 
+    // 릴리스 서명 키는 저장소에 두지 않고, CI가 GitHub Secret에서 꺼내 경로를 넘겨준다.
+    // (키가 없으면 로컬 테스트용 기본 디버그 키로 서명)
+    val releaseKeystore = System.getenv("SIGNING_KEYSTORE_PATH")?.let { file(it) }?.takeIf { it.exists() }
+
     signingConfigs {
-        // 저장소에 포함된 고정 키로 서명해서, 새 버전 APK를 지우지 않고 바로 덮어 설치할 수 있게 함
-        create("shared") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("SIGNING_PASSWORD")
+                keyAlias = System.getenv("SIGNING_KEY_ALIAS") ?: "baeminrefresh"
+                keyPassword = System.getenv("SIGNING_PASSWORD")
+            }
         }
     }
 
     buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("shared")
-        }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("shared")
+            signingConfig = if (releaseKeystore != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
