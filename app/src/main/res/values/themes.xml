@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.BaeminRefresh" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/mint</item>
+        <item name="colorPrimaryDark">@color/mint_dark</item>
+        <item name="colorAccent">@color/mint</item>
+        <item name="android:statusBarColor">@color/mint_dark</item>
+        <item name="android:windowBackground">@color/bg</item>
+    </style>
+</resources>
