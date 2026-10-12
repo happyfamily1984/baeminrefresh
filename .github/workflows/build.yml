@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,3 +25,17 @@ jobs:
         with:
           name: BaeminRefresh-apk
           path: BaeminRefresh.apk
+      # 기본 브랜치에 올라온 빌드는 릴리스로 게시 →
+      # https://github.com/<owner>/<repo>/releases/latest/download/BaeminRefresh.apk 가 항상 최신 APK를 가리킨다
+      - name: Publish release
+        if: github.ref_name == github.event.repository.default_branch
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: 배민리프레시 (빌드 ${{ github.run_number }})
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: BaeminRefresh.apk
+          body: |
+            아래 **BaeminRefresh.apk**를 눌러 내려받아 설치하세요.
+            설치 방법과 Play 프로텍트에 막힐 때의 해결 방법은 README를 참고하세요.
