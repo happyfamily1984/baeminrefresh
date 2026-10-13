@@ -334,7 +334,7 @@ class IncomeActivity : AppCompatActivity() {
         repo.saveAll(records) { saved, err ->
             progress.cancel()
             if (err != null) {
-                Toast.makeText(this, "일부만 저장됨($saved일): $err", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "일부만 저장됨(${saved}일): $err", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(this, "${saved}일치 기록을 불러왔어요", Toast.LENGTH_LONG).show()
             }
