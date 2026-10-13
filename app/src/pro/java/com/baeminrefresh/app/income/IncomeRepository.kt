@@ -104,6 +104,32 @@ class IncomeRepository private constructor(context: Context) {
             .addOnFailureListener { onResult(emptyList(), it.localizedMessage) }
     }
 
+    /** 여러 날짜를 한 번에 저장 (CSV 불러오기용). Firestore 배치 한도(500)를 고려해 나눠서 커밋한다. */
+    fun saveAll(records: List<DayRecord>, onResult: (saved: Int, error: String?) -> Unit) {
+        if (!isSignedIn) {
+            onResult(0, "로그인이 필요해요"); return
+        }
+        if (records.isEmpty()) {
+            onResult(0, null); return
+        }
+        val chunks = records.chunked(400)
+        var saved = 0
+        fun commit(i: Int) {
+            if (i >= chunks.size) {
+                onResult(saved, null); return
+            }
+            val batch = db.batch()
+            for (r in chunks[i]) batch.set(days().document(r.date), r.toMap())
+            batch.commit()
+                .addOnSuccessListener {
+                    saved += chunks[i].size
+                    commit(i + 1)
+                }
+                .addOnFailureListener { onResult(saved, it.localizedMessage) }
+        }
+        commit(0)
+    }
+
     companion object {
         @Volatile
         private var instance: IncomeRepository? = null

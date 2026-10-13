@@ -30,6 +30,11 @@ class IncomeActivity : AppCompatActivity() {
     private var month: YearMonth = YearMonth.now()
     private var monthData: Map<String, DayRecord> = emptyMap()
 
+    private val importPicker =
+        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) handlePickedFile(uri)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repo = IncomeRepository.get(this)
@@ -46,6 +51,13 @@ class IncomeActivity : AppCompatActivity() {
         findViewById<View>(R.id.month_next).setOnClickListener { month = month.plusMonths(1); reload() }
         findViewById<MaterialButton>(R.id.income_add_today).setOnClickListener {
             openDate(LocalDate.now().toString())
+        }
+        findViewById<MaterialButton>(R.id.income_import).setOnClickListener {
+            try {
+                importPicker.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*"))
+            } catch (e: Exception) {
+                Toast.makeText(this, "파일 선택기를 열 수 없어요", Toast.LENGTH_SHORT).show()
+            }
         }
         buildWeekdayHeader()
     }
@@ -273,6 +285,61 @@ class IncomeActivity : AppCompatActivity() {
 
     private fun openDate(date: String) {
         startActivity(Intent(this, QuickAddActivity::class.java).putExtra(QuickAddActivity.EXTRA_DATE, date))
+    }
+
+    // ---------------- CSV 불러오기 ----------------
+
+    private fun handlePickedFile(uri: android.net.Uri) {
+        val text = try {
+            contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+        } catch (e: Exception) {
+            null
+        }
+        if (text.isNullOrBlank()) {
+            Toast.makeText(this, "파일을 읽지 못했어요", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val result = CsvImport.parse(text)
+        if (result.records.isEmpty()) {
+            val detail = result.errors.take(3).joinToString("\n")
+            AlertDialog.Builder(this)
+                .setTitle("불러올 내용이 없어요")
+                .setMessage("형식을 확인해 주세요.\n\n줄 형식: date,platform,count,amount,promo,extra\n예: 2026-10-01,배민,12,85000,3000,0" +
+                    if (detail.isNotEmpty()) "\n\n$detail" else "")
+                .setPositiveButton("확인", null)
+                .show()
+            return
+        }
+
+        val dates = result.records.map { it.date }.sorted()
+        val totalAmount = result.records.sumOf { it.totalAmount }
+        val warnExisting = dates.count { monthData.containsKey(it) }
+        val msg = buildString {
+            append("${result.records.size}일치 기록을 불러와요.\n")
+            append("기간: ${dates.first()} ~ ${dates.last()}\n")
+            append("합계: ${Fmt.won(totalAmount)}\n")
+            if (result.errors.isNotEmpty()) append("\n읽지 못한 줄 ${result.errors.size}개는 건너뛰어요.\n")
+            append("\n같은 날짜가 이미 있으면 새 값으로 덮어써요.")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("CSV 불러오기")
+            .setMessage(msg)
+            .setPositiveButton("불러오기") { _, _ -> doImport(result.records) }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun doImport(records: List<DayRecord>) {
+        val progress = Toast.makeText(this, "저장 중...", Toast.LENGTH_SHORT).also { it.show() }
+        repo.saveAll(records) { saved, err ->
+            progress.cancel()
+            if (err != null) {
+                Toast.makeText(this, "일부만 저장됨($saved일): $err", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this, "${saved}일치 기록을 불러왔어요", Toast.LENGTH_LONG).show()
+            }
+            reload()
+        }
     }
 
     // ---------------- 기타 ----------------
