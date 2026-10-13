@@ -62,6 +62,12 @@ class MainActivity : AppCompatActivity() {
         setupFloatingControls()
         findViewById<TextView>(R.id.help_text).text = HELP_TEXT
 
+        val incomeButton = findViewById<MaterialButton>(R.id.income_button)
+        if (IncomeFeature.enabled) {
+            incomeButton.visibility = View.VISIBLE
+            incomeButton.setOnClickListener { IncomeFeature.openTracker(this) }
+        }
+
         if (!prefs.welcomeShown) showWelcome()
     }
 

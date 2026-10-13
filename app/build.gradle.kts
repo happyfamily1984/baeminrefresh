@@ -11,8 +11,23 @@ android {
         applicationId = "com.baeminrefresh.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.2.0"
+    }
+
+    flavorDimensions += "tier"
+    productFlavors {
+        // 지사 배포용: 재시작 기능만. 기존과 동일한 앱.
+        create("rider") {
+            dimension = "tier"
+            applicationId = "com.baeminrefresh.app"
+        }
+        // 내 수입 기록까지 들어간 버전. 같은 applicationId/키라서 rider 위에 덮어 설치된다.
+        create("pro") {
+            dimension = "tier"
+            applicationId = "com.baeminrefresh.app"
+            versionNameSuffix = "-pro"
+        }
     }
 
     // 릴리스 서명 키는 저장소에 두지 않고, CI가 GitHub Secret에서 꺼내 경로를 넘겨준다.
@@ -54,4 +69,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
+
+    // Firebase는 pro 버전에만 포함 (지사 배포용 rider에는 들어가지 않음)
+    add("proImplementation", platform("com.google.firebase:firebase-bom:33.7.0"))
+    add("proImplementation", "com.google.firebase:firebase-auth")
+    add("proImplementation", "com.google.firebase:firebase-firestore")
 }
