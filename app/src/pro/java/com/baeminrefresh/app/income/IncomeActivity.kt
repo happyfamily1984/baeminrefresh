@@ -79,10 +79,14 @@ class IncomeActivity : AppCompatActivity() {
         val perDelivery = if (totalCount > 0) (totalAmount.toDouble() / totalCount).roundToInt().toLong() else 0L
         val perDay = if (workingDays > 0) (totalAmount.toDouble() / workingDays).roundToInt().toLong() else 0L
 
+        val promo = monthData.values.sumOf { it.totalPromo }
+        val extra = monthData.values.sumOf { it.totalExtra }
+
         findViewById<TextView>(R.id.sum_count).text = Fmt.num(totalCount)
         findViewById<TextView>(R.id.sum_amount).text = Fmt.won(totalAmount)
         findViewById<TextView>(R.id.sum_sub).text =
-            "근무 ${workingDays}일 · 건당 ${Fmt.won(perDelivery)} · 일 평균 ${Fmt.won(perDay)}"
+            "근무 ${workingDays}일 · 건당 ${Fmt.won(perDelivery)} · 일 평균 ${Fmt.won(perDay)}\n" +
+                "프로모션 ${Fmt.won(promo)} · 과적 ${Fmt.won(extra)} 포함"
     }
 
     private fun loadComparison() {
@@ -120,9 +124,9 @@ class IncomeActivity : AppCompatActivity() {
     private fun renderPlatforms() {
         val container = findViewById<LinearLayout>(R.id.platform_container)
         container.removeAllViews()
-        val maxAmount = Platform.values().maxOf { p -> monthData.values.sumOf { it.amount(p) } }.coerceAtLeast(1)
+        val maxAmount = Platform.values().maxOf { p -> monthData.values.sumOf { it.platformTotal(p) } }.coerceAtLeast(1)
         for (p in Platform.values()) {
-            val amount = monthData.values.sumOf { it.amount(p) }
+            val amount = monthData.values.sumOf { it.platformTotal(p) }
             val count = monthData.values.sumOf { it.count(p) }
             container.addView(platformBar(p, count, amount, maxAmount))
         }

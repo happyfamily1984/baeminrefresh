@@ -7,17 +7,32 @@ enum class Platform(val key: String, val label: String, val colorHex: String) {
     AGENCY("agency", "일반대행", "#FF7A00"),
 }
 
-/** 하루치 기록. 날짜(yyyy-MM-dd)별로 Firestore 문서 하나. */
+/**
+ * 하루치 기록. 날짜(yyyy-MM-dd)별로 Firestore 문서 하나.
+ * 플랫폼마다 완료건수 / 배달료 / 프로모션 / 과적금액을 따로 기록한다.
+ */
 data class DayRecord(
     val date: String,
     val counts: MutableMap<String, Long> = mutableMapOf(),
     val amounts: MutableMap<String, Long> = mutableMapOf(),
+    val promos: MutableMap<String, Long> = mutableMapOf(),
+    val extras: MutableMap<String, Long> = mutableMapOf(),
 ) {
     fun count(p: Platform): Long = counts[p.key] ?: 0L
     fun amount(p: Platform): Long = amounts[p.key] ?: 0L
+    fun promo(p: Platform): Long = promos[p.key] ?: 0L
+    fun extra(p: Platform): Long = extras[p.key] ?: 0L
+
+    /** 플랫폼 하나의 총수입 = 배달료 + 프로모션 + 과적 */
+    fun platformTotal(p: Platform): Long = amount(p) + promo(p) + extra(p)
 
     val totalCount: Long get() = Platform.values().sumOf { count(it) }
-    val totalAmount: Long get() = Platform.values().sumOf { amount(it) }
+    val totalBase: Long get() = Platform.values().sumOf { amount(it) }
+    val totalPromo: Long get() = Platform.values().sumOf { promo(it) }
+    val totalExtra: Long get() = Platform.values().sumOf { extra(it) }
+
+    /** 하루 총수입 = 모든 플랫폼의 배달료 + 프로모션 + 과적 */
+    val totalAmount: Long get() = totalBase + totalPromo + totalExtra
     val isEmpty: Boolean get() = totalCount == 0L && totalAmount == 0L
 
     fun toMap(): Map<String, Any> {
@@ -25,6 +40,8 @@ data class DayRecord(
         for (p in Platform.values()) {
             m["${p.key}_count"] = count(p)
             m["${p.key}_amount"] = amount(p)
+            m["${p.key}_promo"] = promo(p)
+            m["${p.key}_extra"] = extra(p)
         }
         return m
     }
@@ -36,6 +53,8 @@ data class DayRecord(
             for (p in Platform.values()) {
                 (data["${p.key}_count"] as? Number)?.let { r.counts[p.key] = it.toLong() }
                 (data["${p.key}_amount"] as? Number)?.let { r.amounts[p.key] = it.toLong() }
+                (data["${p.key}_promo"] as? Number)?.let { r.promos[p.key] = it.toLong() }
+                (data["${p.key}_extra"] as? Number)?.let { r.extras[p.key] = it.toLong() }
             }
             return r
         }

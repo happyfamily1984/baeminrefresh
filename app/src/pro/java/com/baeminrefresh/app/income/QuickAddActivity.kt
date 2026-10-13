@@ -23,7 +23,12 @@ class QuickAddActivity : AppCompatActivity() {
     private lateinit var repo: IncomeRepository
     private lateinit var date: String
 
-    private data class Row(val count: EditText, val amount: EditText)
+    private data class Row(
+        val count: EditText,
+        val amount: EditText,
+        val promo: EditText,
+        val extra: EditText,
+    )
 
     private val rows = linkedMapOf<Platform, Row>()
 
@@ -41,9 +46,18 @@ class QuickAddActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.qa_date).text = prettyDate(date)
 
-        rows[Platform.BAEMIN] = Row(findViewById(R.id.qa_baemin_count), findViewById(R.id.qa_baemin_amount))
-        rows[Platform.COUPANG] = Row(findViewById(R.id.qa_coupang_count), findViewById(R.id.qa_coupang_amount))
-        rows[Platform.AGENCY] = Row(findViewById(R.id.qa_agency_count), findViewById(R.id.qa_agency_amount))
+        rows[Platform.BAEMIN] = Row(
+            findViewById(R.id.qa_baemin_count), findViewById(R.id.qa_baemin_amount),
+            findViewById(R.id.qa_baemin_promo), findViewById(R.id.qa_baemin_extra)
+        )
+        rows[Platform.COUPANG] = Row(
+            findViewById(R.id.qa_coupang_count), findViewById(R.id.qa_coupang_amount),
+            findViewById(R.id.qa_coupang_promo), findViewById(R.id.qa_coupang_extra)
+        )
+        rows[Platform.AGENCY] = Row(
+            findViewById(R.id.qa_agency_count), findViewById(R.id.qa_agency_amount),
+            findViewById(R.id.qa_agency_promo), findViewById(R.id.qa_agency_extra)
+        )
 
         val totalView = findViewById<TextView>(R.id.qa_total)
         val watcher = object : TextWatcher {
@@ -51,13 +65,20 @@ class QuickAddActivity : AppCompatActivity() {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
         }
-        rows.values.forEach { it.count.addTextChangedListener(watcher); it.amount.addTextChangedListener(watcher) }
+        rows.values.forEach {
+            it.count.addTextChangedListener(watcher)
+            it.amount.addTextChangedListener(watcher)
+            it.promo.addTextChangedListener(watcher)
+            it.extra.addTextChangedListener(watcher)
+        }
 
         // 기존 기록 불러와 채우기
         repo.loadDay(date) { record ->
             for ((p, row) in rows) {
                 if (record.count(p) > 0) row.count.setText(record.count(p).toString())
                 if (record.amount(p) > 0) row.amount.setText(record.amount(p).toString())
+                if (record.promo(p) > 0) row.promo.setText(record.promo(p).toString())
+                if (record.extra(p) > 0) row.extra.setText(record.extra(p).toString())
             }
             updateTotal(totalView)
         }
@@ -78,7 +99,7 @@ class QuickAddActivity : AppCompatActivity() {
         var amount = 0L
         for (row in rows.values) {
             count += parse(row.count)
-            amount += parse(row.amount)
+            amount += parse(row.amount) + parse(row.promo) + parse(row.extra)
         }
         totalView.text = "합계  ${Fmt.num(count)}건 · ${Fmt.won(amount)}"
     }
@@ -88,6 +109,8 @@ class QuickAddActivity : AppCompatActivity() {
         for ((p, row) in rows) {
             record.counts[p.key] = parse(row.count)
             record.amounts[p.key] = parse(row.amount)
+            record.promos[p.key] = parse(row.promo)
+            record.extras[p.key] = parse(row.extra)
         }
         repo.save(record) { ok, err ->
             if (ok) {
