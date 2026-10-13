@@ -236,7 +236,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                         prefs.posX = lp.x
                         prefs.posY = lp.y
                     } else if (SystemClock.uptimeMillis() - downAt >= LONG_PRESS_MS) {
-                        IncomeFeature.onFloatingLongPress(this@FloatingService)
+                        openSettingsScreen()
                     } else {
                         v.performClick()
                         onBubbleTapped()

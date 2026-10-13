@@ -63,17 +63,6 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/income_button"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="16dp"
-                android:paddingTop="14dp"
-                android:paddingBottom="14dp"
-                android:text="📅  수입 기록 열기"
-                android:textSize="16sp"
-                android:visibility="gone" />
-
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

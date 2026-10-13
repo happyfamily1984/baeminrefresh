@@ -27,23 +27,19 @@ jobs:
           fi
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
           echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
-      - name: Build release APKs (rider + pro)
+      - name: Build release APK
         env:
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
-      - name: Rename APKs
-        run: |
-          cp app/build/outputs/apk/rider/release/app-rider-release.apk BaeminRefresh.apk
-          cp app/build/outputs/apk/pro/release/app-pro-release.apk BaeminRefresh-Pro.apk
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk BaeminRefresh.apk
       - uses: actions/upload-artifact@v4
         with:
           name: BaeminRefresh-apk
-          path: |
-            BaeminRefresh.apk
-            BaeminRefresh-Pro.apk
-      # 지사 배포용(재시작 전용). latest 링크는 이 rider APK만 가리킨다.
+          path: BaeminRefresh.apk
+      # 재시작 전용 APK. latest 링크가 항상 최신 빌드를 가리킨다.
       # https://github.com/<owner>/<repo>/releases/latest/download/BaeminRefresh.apk
-      - name: Publish rider release
+      - name: Publish release
         if: github.ref_name == github.event.repository.default_branch
         uses: softprops/action-gh-release@v2
         with:
@@ -53,20 +49,5 @@ jobs:
           make_latest: true
           files: BaeminRefresh.apk
           body: |
-            지사 배포용(재시작 전용) APK입니다.
             아래 **BaeminRefresh.apk**를 눌러 내려받아 설치하세요.
             설치 방법과 Play 프로텍트에 막힐 때의 해결 방법은 README를 참고하세요.
-      # 내 수입 기록 버전. 고정 태그 'pro' 라서 링크가 항상 같다.
-      # https://github.com/<owner>/<repo>/releases/download/pro/BaeminRefresh-Pro.apk
-      - name: Publish pro release
-        if: github.ref_name == github.event.repository.default_branch
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: pro
-          name: 배민리프레시 Pro (수입 기록 포함)
-          target_commitish: ${{ github.sha }}
-          make_latest: false
-          files: BaeminRefresh-Pro.apk
-          body: |
-            수입 기록 기능이 들어간 개인용 버전입니다. 지사 배포용이 아닙니다.
-            아래 **BaeminRefresh-Pro.apk**를 내려받아 설치하세요.
