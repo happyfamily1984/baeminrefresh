@@ -41,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var floatingSwitch: MaterialSwitch
     private lateinit var floatingStatus: TextView
     private var updatingSwitch = false
+    private var forceShowSteps = false
 
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -234,10 +235,33 @@ class MainActivity : AppCompatActivity() {
         stepBattery.setDone(pm.isIgnoringBatteryOptimizations(packageName), optional = true)
 
         val done = listOf(appOk, overlayOk, accessibilityOk).count { it }
-        progressText.text = if (done == 3) "✓ 필수 설정 완료! 아래에서 플로팅 버튼을 켜세요"
+        progressText.text = if (done == 3) "✓ 설정 완료"
         else "필수 설정 $done / 3 완료"
 
+        applySetupVisibility(done == 3)
         updateFloatingSwitch()
+    }
+
+    /** 필수 설정이 끝나면 설정 단계를 접고, 다시 보기 버튼만 남긴다. */
+    private fun applySetupVisibility(allDone: Boolean) {
+        val header = findViewById<TextView>(R.id.setup_header)
+        val steps = findViewById<LinearLayout>(R.id.steps_container)
+        val showButton = findViewById<MaterialButton>(R.id.show_setup_button)
+
+        val showSteps = !allDone || forceShowSteps
+        header.visibility = if (showSteps) View.VISIBLE else View.GONE
+        steps.visibility = if (showSteps) View.VISIBLE else View.GONE
+
+        if (allDone) {
+            showButton.visibility = View.VISIBLE
+            showButton.text = if (forceShowSteps) "설정 접기" else "권한·설정 다시 보기"
+            showButton.setOnClickListener {
+                forceShowSteps = !forceShowSteps
+                applySetupVisibility(true)
+            }
+        } else {
+            showButton.visibility = View.GONE
+        }
     }
 
     // ---------------- 플로팅 버튼 설정 ----------------
