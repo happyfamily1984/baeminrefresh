@@ -110,10 +110,29 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "추가할 앱이 없어요", Toast.LENGTH_SHORT).show()
             return
         }
-        val items = apps.map { it.label }.toTypedArray()
+        val iconSize = (36 * resources.displayMetrics.density).toInt()
+        val pad = (12 * resources.displayMetrics.density).toInt()
+        val adapter = object : android.widget.ArrayAdapter<AppEntry>(
+            this, android.R.layout.select_dialog_item, android.R.id.text1, apps
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                val v = super.getView(position, convertView, parent)
+                val tv = v.findViewById<TextView>(android.R.id.text1)
+                tv.text = apps[position].label
+                val icon = try {
+                    packageManager.getApplicationIcon(apps[position].packageName)
+                } catch (e: Exception) {
+                    null
+                }
+                icon?.setBounds(0, 0, iconSize, iconSize)
+                tv.setCompoundDrawables(icon, null, null, null)
+                tv.compoundDrawablePadding = pad
+                return v
+            }
+        }
         AlertDialog.Builder(this)
             .setTitle("스티커로 만들 앱을 고르세요")
-            .setItems(items) { _, which ->
+            .setAdapter(adapter) { _, which ->
                 prefs.addSticker(apps[which].packageName)
                 renderStickers()
                 if (!FloatingService.isRunning || !Settings.canDrawOverlays(this)) {
@@ -238,26 +257,31 @@ class MainActivity : AppCompatActivity() {
         progressText.text = if (done == 3) "✓ 설정 완료"
         else "필수 설정 $done / 3 완료"
 
-        applySetupVisibility(done == 3)
+        applySetupVisibility()
         updateFloatingSwitch()
     }
 
-    /** 필수 설정이 끝나면 설정 단계를 접고, 다시 보기 버튼만 남긴다. */
-    private fun applySetupVisibility(allDone: Boolean) {
+    /** 완료된 단계는 숨기고, 아직 할 게 남은 단계만 보여 준다. */
+    private fun applySetupVisibility() {
+        val steps = listOfNotNull(stepApp, stepOverlay, stepAccessibility, stepNotification, stepBattery)
         val header = findViewById<TextView>(R.id.setup_header)
-        val steps = findViewById<LinearLayout>(R.id.steps_container)
         val showButton = findViewById<MaterialButton>(R.id.show_setup_button)
 
-        val showSteps = !allDone || forceShowSteps
-        header.visibility = if (showSteps) View.VISIBLE else View.GONE
-        steps.visibility = if (showSteps) View.VISIBLE else View.GONE
+        var anyVisible = false
+        for (s in steps) {
+            val show = forceShowSteps || !s.isDone
+            s.root.visibility = if (show) View.VISIBLE else View.GONE
+            if (show) anyVisible = true
+        }
+        header.visibility = if (anyVisible) View.VISIBLE else View.GONE
 
-        if (allDone) {
+        // 완료돼서 숨긴 단계가 있으면, 다시 볼 수 있는 토글 버튼을 둔다.
+        if (steps.any { it.isDone }) {
             showButton.visibility = View.VISIBLE
-            showButton.text = if (forceShowSteps) "설정 접기" else "권한·설정 다시 보기"
+            showButton.text = if (forceShowSteps) "완료된 설정 접기" else "완료된 설정 보기"
             showButton.setOnClickListener {
                 forceShowSteps = !forceShowSteps
-                applySetupVisibility(true)
+                applySetupVisibility()
             }
         } else {
             showButton.visibility = View.GONE
@@ -462,6 +486,8 @@ class MainActivity : AppCompatActivity() {
         val guide: TextView = root.findViewById(R.id.step_guide)
         val action: MaterialButton = root.findViewById(R.id.step_action)
         val secondary: MaterialButton = root.findViewById(R.id.step_secondary)
+        var isDone = false
+            private set
 
         fun setAction(text: String, onClick: () -> Unit) {
             action.text = text
@@ -480,6 +506,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         fun setDone(done: Boolean, optional: Boolean = false) {
+            isDone = done
             val ctx = root.context
             status.text = when {
                 done -> "완료"
