@@ -62,6 +62,8 @@ class MainActivity : AppCompatActivity() {
         setupFloatingControls()
         findViewById<TextView>(R.id.help_text).text = HELP_TEXT
 
+        findViewById<MaterialButton>(R.id.add_sticker_button).setOnClickListener { showStickerPicker() }
+
         if (!prefs.welcomeShown) showWelcome()
     }
 
@@ -71,6 +73,54 @@ class MainActivity : AppCompatActivity() {
             TargetApps.detectBaeminConnect(this)?.let { prefs.targetPackage = it.packageName }
         }
         refresh()
+        renderStickers()
+    }
+
+    // ---------------- 앱 스티커 ----------------
+
+    private fun renderStickers() {
+        val container = findViewById<LinearLayout>(R.id.sticker_container)
+        container.removeAllViews()
+        val stickers = prefs.getStickers()
+        if (stickers.isEmpty()) return
+        val inflater = LayoutInflater.from(this)
+        for (s in stickers) {
+            val label = TargetApps.labelOf(this, s.packageName)
+            val row = inflater.inflate(R.layout.item_sticker, container, false)
+            val iconView = row.findViewById<android.widget.ImageView>(R.id.sticker_icon)
+            try {
+                iconView.setImageDrawable(packageManager.getApplicationIcon(s.packageName))
+            } catch (e: Exception) {
+                iconView.setImageResource(R.drawable.ic_refresh)
+            }
+            row.findViewById<TextView>(R.id.sticker_label).text = label ?: s.packageName
+            row.findViewById<View>(R.id.sticker_remove).setOnClickListener {
+                prefs.removeSticker(s.packageName)
+                renderStickers()
+            }
+            container.addView(row)
+        }
+    }
+
+    private fun showStickerPicker() {
+        val existing = prefs.getStickers().map { it.packageName }.toSet()
+        val apps = TargetApps.launchableApps(this).filter { it.packageName !in existing }
+        if (apps.isEmpty()) {
+            Toast.makeText(this, "추가할 앱이 없어요", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val items = apps.map { it.label }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("스티커로 만들 앱을 고르세요")
+            .setItems(items) { _, which ->
+                prefs.addSticker(apps[which].packageName)
+                renderStickers()
+                if (!FloatingService.isRunning || !Settings.canDrawOverlays(this)) {
+                    Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 스티커가 화면에 나타나요", Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun setupEdgeToEdge() {

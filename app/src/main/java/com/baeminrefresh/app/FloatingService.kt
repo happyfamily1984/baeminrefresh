@@ -37,10 +37,17 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private lateinit var wm: WindowManager
     private lateinit var prefs: Prefs
-    private var bubble: FrameLayout? = null
-    private var icon: ImageView? = null
-    private var params: WindowManager.LayoutParams? = null
-    private var spinner: ObjectAnimator? = null
+
+    /** launchPkg == null 이면 배민커넥트 재시작 버튼, 아니면 해당 앱을 실행하는 스티커 */
+    private inner class Bubble(val launchPkg: String?) {
+        lateinit var frame: FrameLayout
+        lateinit var iv: ImageView
+        lateinit var lp: WindowManager.LayoutParams
+        var spinner: ObjectAnimator? = null
+        val isRestart: Boolean get() = launchPkg == null
+    }
+
+    private val bubbles = mutableListOf<Bubble>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -54,7 +61,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             stopSelf()
             return
         }
-        addBubble()
+        buildAll()
         prefs.registerListener(this)
         isRunning = true
     }
@@ -71,23 +78,23 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     override fun onDestroy() {
         isRunning = false
         prefs.unregisterListener(this)
-        spinner?.cancel()
-        bubble?.let { runCatching { wm.removeView(it) } }
-        bubble = null
+        removeAllBubbles()
         super.onDestroy()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // 화면 회전 시 버튼이 화면 밖으로 나가지 않게
-        val p = params ?: return
-        clampAndApply(p.x, p.y)
+        // 화면 회전 시 버튼들이 화면 밖으로 나가지 않게
+        for (b in bubbles) clampAndApply(b, b.lp.x, b.lp.y)
     }
 
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
         when (key) {
-            Prefs.KEY_SIZE, Prefs.KEY_ALPHA -> applyAppearance()
-            Prefs.KEY_X, Prefs.KEY_Y -> if (prefs.posX < 0) moveToDefaultPosition()
+            Prefs.KEY_SIZE, Prefs.KEY_ALPHA -> bubbles.forEach { applyAppearance(it) }
+            Prefs.KEY_X, Prefs.KEY_Y -> bubbles.firstOrNull { it.isRestart }?.let { b ->
+                if (prefs.posX < 0) defaultPosition(b) else clampAndApply(b, prefs.posX, prefs.posY)
+            }
+            Prefs.KEY_STICKERS -> rebuildStickers()
         }
     }
 
@@ -126,67 +133,130 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
     }
 
-    // ---------------- 플로팅 버튼 ----------------
+    // ---------------- 버튼 생성/제거 ----------------
 
-    private fun addBubble() {
+    private fun buildAll() {
+        removeAllBubbles()
+        addRestartBubble()
+        for (s in prefs.getStickers()) addStickerBubble(s)
+    }
+
+    private fun rebuildStickers() {
+        // 스티커 버튼만 다시 그린다 (재시작 버튼은 유지)
+        val toRemove = bubbles.filter { !it.isRestart }
+        for (b in toRemove) {
+            b.spinner?.cancel()
+            runCatching { wm.removeView(b.frame) }
+        }
+        bubbles.removeAll(toRemove)
+        for (s in prefs.getStickers()) addStickerBubble(s)
+    }
+
+    private fun removeAllBubbles() {
+        for (b in bubbles) {
+            b.spinner?.cancel()
+            runCatching { wm.removeView(b.frame) }
+        }
+        bubbles.clear()
+    }
+
+    private fun addRestartBubble() {
         val sizePx = dp(prefs.buttonSizeDp)
-        val iv = ImageView(this).apply {
+        val b = Bubble(null)
+        b.iv = ImageView(this).apply {
             setImageResource(R.drawable.ic_refresh)
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        val frame = FrameLayout(this).apply {
+        b.frame = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(ContextCompat.getColor(this@FloatingService, R.color.mint))
                 setStroke(dp(2), 0xFFFFFFFF.toInt())
             }
             elevation = dp(6).toFloat()
-            addView(iv, FrameLayout.LayoutParams(sizePx / 2, sizePx / 2, Gravity.CENTER))
+            addView(b.iv, FrameLayout.LayoutParams(sizePx / 2, sizePx / 2, Gravity.CENTER))
         }
-        val lp = WindowManager.LayoutParams(
-            sizePx, sizePx,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-        }
-        bubble = frame
-        icon = iv
-        params = lp
-        frame.alpha = prefs.buttonAlpha / 100f
-        frame.setOnTouchListener(DragTouchListener())
-        wm.addView(frame, lp)
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        runCatching { wm.addView(b.frame, b.lp) }
 
-        if (prefs.posX < 0 || prefs.posY < 0) moveToDefaultPosition()
-        else clampAndApply(prefs.posX, prefs.posY)
+        if (prefs.posX < 0 || prefs.posY < 0) defaultPosition(b)
+        else clampAndApply(b, prefs.posX, prefs.posY)
     }
 
-    private fun applyAppearance() {
-        val frame = bubble ?: return
-        val lp = params ?: return
+    private fun addStickerBubble(sticker: Sticker) {
+        val pkg = sticker.packageName
+        val iconDrawable = try {
+            packageManager.getApplicationIcon(pkg)
+        } catch (e: Exception) {
+            // 앱이 삭제됨 → 스티커 정리
+            prefs.removeSticker(pkg)
+            return
+        }
         val sizePx = dp(prefs.buttonSizeDp)
-        lp.width = sizePx
-        lp.height = sizePx
-        icon?.layoutParams = FrameLayout.LayoutParams(sizePx / 2, sizePx / 2, Gravity.CENTER)
-        frame.alpha = prefs.buttonAlpha / 100f
-        clampAndApply(lp.x, lp.y)
+        val b = Bubble(pkg)
+        b.iv = ImageView(this).apply {
+            setImageDrawable(iconDrawable)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        b.frame = FrameLayout(this).apply {
+            elevation = dp(5).toFloat()
+            val pad = dp(1)
+            addView(
+                b.iv,
+                FrameLayout.LayoutParams(sizePx - pad * 2, sizePx - pad * 2, Gravity.CENTER)
+            )
+        }
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        runCatching { wm.addView(b.frame, b.lp) }
+
+        if (sticker.x < 0 || sticker.y < 0) defaultStickerPosition(b)
+        else clampAndApply(b, sticker.x, sticker.y)
     }
 
-    private fun moveToDefaultPosition() {
+    private fun newLayoutParams(sizePx: Int) = WindowManager.LayoutParams(
+        sizePx, sizePx,
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        PixelFormat.TRANSLUCENT
+    ).apply { gravity = Gravity.TOP or Gravity.START }
+
+    private fun applyAppearance(b: Bubble) {
+        val sizePx = dp(prefs.buttonSizeDp)
+        b.lp.width = sizePx
+        b.lp.height = sizePx
+        val iconSize = if (b.isRestart) sizePx / 2 else sizePx - dp(1) * 2
+        b.iv.layoutParams = FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        clampAndApply(b, b.lp.x, b.lp.y)
+    }
+
+    private fun defaultPosition(b: Bubble) {
         val (w, h) = screenSize()
         val size = dp(prefs.buttonSizeDp)
-        clampAndApply(w - size - dp(12), (h * 0.6f).roundToInt())
+        clampAndApply(b, w - size - dp(12), (h * 0.6f).roundToInt())
     }
 
-    private fun clampAndApply(x: Int, y: Int) {
-        val frame = bubble ?: return
-        val lp = params ?: return
+    private fun defaultStickerPosition(b: Bubble) {
+        // 스티커는 왼쪽에 세로로 쌓이게
+        val (_, h) = screenSize()
+        val size = dp(prefs.buttonSizeDp)
+        val index = bubbles.count { !it.isRestart } - 1
+        val y = (h * 0.3f).roundToInt() + index * (size + dp(10))
+        clampAndApply(b, dp(12), y)
+    }
+
+    private fun clampAndApply(b: Bubble, x: Int, y: Int) {
         val (w, h) = screenSize()
-        lp.x = x.coerceIn(0, (w - lp.width).coerceAtLeast(0))
-        lp.y = y.coerceIn(0, (h - lp.height).coerceAtLeast(0))
-        runCatching { wm.updateViewLayout(frame, lp) }
+        b.lp.x = x.coerceIn(0, (w - b.lp.width).coerceAtLeast(0))
+        b.lp.y = y.coerceIn(0, (h - b.lp.height).coerceAtLeast(0))
+        runCatching { wm.updateViewLayout(b.frame, b.lp) }
     }
 
     private fun screenSize(): Pair<Int, Int> {
@@ -199,7 +269,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
-    private inner class DragTouchListener : View.OnTouchListener {
+    private inner class DragTouchListener(private val bubble: Bubble) : View.OnTouchListener {
         private val touchSlop = ViewConfiguration.get(this@FloatingService).scaledTouchSlop
         private var startX = 0
         private var startY = 0
@@ -209,7 +279,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private var dragging = false
 
         override fun onTouch(v: View, e: MotionEvent): Boolean {
-            val lp = params ?: return false
+            val lp = bubble.lp
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     startX = lp.x
@@ -227,19 +297,18 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                         dragging = true
                         v.alpha = 1f
                     }
-                    if (dragging) clampAndApply(startX + dx.roundToInt(), startY + dy.roundToInt())
+                    if (dragging) clampAndApply(bubble, startX + dx.roundToInt(), startY + dy.roundToInt())
                 }
                 MotionEvent.ACTION_UP -> {
                     v.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
                     if (dragging) {
                         v.alpha = prefs.buttonAlpha / 100f
-                        prefs.posX = lp.x
-                        prefs.posY = lp.y
+                        savePosition(bubble)
                     } else if (SystemClock.uptimeMillis() - downAt >= LONG_PRESS_MS) {
                         openSettingsScreen()
                     } else {
                         v.performClick()
-                        onBubbleTapped()
+                        onBubbleTapped(bubble)
                     }
                 }
                 MotionEvent.ACTION_CANCEL -> {
@@ -251,9 +320,38 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
+    private fun savePosition(b: Bubble) {
+        if (b.isRestart) {
+            prefs.posX = b.lp.x
+            prefs.posY = b.lp.y
+        } else {
+            b.launchPkg?.let { prefs.updateStickerPosition(it, b.lp.x, b.lp.y) }
+        }
+    }
+
+    // ---------------- 탭 동작 ----------------
+
+    private fun onBubbleTapped(b: Bubble) {
+        if (b.isRestart) onRestartTapped(b) else launchApp(b.launchPkg!!)
+    }
+
+    private fun launchApp(pkg: String) {
+        val intent = packageManager.getLaunchIntentForPackage(pkg)
+        if (intent == null) {
+            toast("이 앱을 실행할 수 없어요")
+            return
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            toast("앱을 실행하지 못했어요")
+        }
+    }
+
     // ---------------- 재시작 ----------------
 
-    private fun onBubbleTapped() {
+    private fun onRestartTapped(b: Bubble) {
         val pkg = prefs.targetPackage
         if (pkg == null) {
             toast("먼저 배민리프레시 앱에서 배민커넥트 앱을 선택해 주세요")
@@ -267,9 +365,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             return
         }
         if (service.isBusy) return
-        startSpinner()
+        startSpinner(b)
         service.restart(pkg) { result ->
-            stopSpinner()
+            stopSpinner(b)
             when (result) {
                 RestartAccessibilityService.Result.RESTARTED -> toast("배민커넥트를 재시작했어요")
                 RestartAccessibilityService.Result.NOT_RUNNING_LAUNCHED -> toast("배민커넥트를 실행했어요")
@@ -281,10 +379,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
-    private fun startSpinner() {
-        val iv = icon ?: return
-        spinner?.cancel()
-        spinner = ObjectAnimator.ofFloat(iv, View.ROTATION, 0f, 360f).apply {
+    private fun startSpinner(b: Bubble) {
+        b.spinner?.cancel()
+        b.spinner = ObjectAnimator.ofFloat(b.iv, View.ROTATION, 0f, 360f).apply {
             duration = 700
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
@@ -292,10 +389,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
-    private fun stopSpinner() {
-        spinner?.cancel()
-        spinner = null
-        icon?.rotation = 0f
+    private fun stopSpinner(b: Bubble) {
+        b.spinner?.cancel()
+        b.spinner = null
+        b.iv.rotation = 0f
     }
 
     private fun openSettingsScreen() {

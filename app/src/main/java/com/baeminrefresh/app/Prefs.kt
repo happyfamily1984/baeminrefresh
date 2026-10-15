@@ -2,6 +2,11 @@ package com.baeminrefresh.app
 
 import android.content.Context
 import android.content.SharedPreferences
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** 앱 스티커: 특정 앱의 아이콘으로 된 플로팅 버튼. 누르면 그 앱이 실행된다. */
+data class Sticker(val packageName: String, val x: Int = -1, val y: Int = -1)
 
 class Prefs(context: Context) {
     private val sp: SharedPreferences =
@@ -41,6 +46,42 @@ class Prefs(context: Context) {
         sp.edit().remove(KEY_X).remove(KEY_Y).apply()
     }
 
+    // ---------------- 앱 스티커 ----------------
+
+    fun getStickers(): List<Sticker> {
+        val raw = sp.getString(KEY_STICKERS, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                Sticker(o.getString("pkg"), o.optInt("x", -1), o.optInt("y", -1))
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun setStickers(list: List<Sticker>) {
+        val arr = JSONArray()
+        for (s in list) {
+            arr.put(JSONObject().put("pkg", s.packageName).put("x", s.x).put("y", s.y))
+        }
+        sp.edit().putString(KEY_STICKERS, arr.toString()).apply()
+    }
+
+    fun addSticker(pkg: String) {
+        if (getStickers().any { it.packageName == pkg }) return
+        setStickers(getStickers() + Sticker(pkg))
+    }
+
+    fun removeSticker(pkg: String) {
+        setStickers(getStickers().filterNot { it.packageName == pkg })
+    }
+
+    fun updateStickerPosition(pkg: String, x: Int, y: Int) {
+        setStickers(getStickers().map { if (it.packageName == pkg) it.copy(x = x, y = y) else it })
+    }
+
     fun registerListener(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         sp.registerOnSharedPreferenceChangeListener(l)
 
@@ -55,10 +96,11 @@ class Prefs(context: Context) {
         const val KEY_X = "pos_x"
         const val KEY_Y = "pos_y"
         const val KEY_WELCOME = "welcome_shown"
+        const val KEY_STICKERS = "app_stickers"
 
         const val MIN_SIZE_DP = 40
-        const val DEFAULT_SIZE_DP = 60
+        const val DEFAULT_SIZE_DP = 51
         const val MIN_ALPHA = 30
-        const val DEFAULT_ALPHA = 90
+        const val DEFAULT_ALPHA = 60
     }
 }
