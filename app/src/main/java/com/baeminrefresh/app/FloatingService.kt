@@ -303,7 +303,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                     v.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
                     if (dragging) {
                         v.alpha = prefs.buttonAlpha / 100f
-                        savePosition(bubble)
+                        val (tx, ty) = computeSnap(bubble)
+                        savePositionAt(bubble, tx, ty)
+                        animateTo(bubble, tx, ty)
                     } else if (SystemClock.uptimeMillis() - downAt >= LONG_PRESS_MS) {
                         openSettingsScreen()
                     } else {
@@ -320,12 +322,64 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
-    private fun savePosition(b: Bubble) {
+    private fun savePositionAt(b: Bubble, x: Int, y: Int) {
         if (b.isRestart) {
-            prefs.posX = b.lp.x
-            prefs.posY = b.lp.y
+            prefs.posX = x
+            prefs.posY = y
         } else {
-            b.launchPkg?.let { prefs.updateStickerPosition(it, b.lp.x, b.lp.y) }
+            b.launchPkg?.let { prefs.updateStickerPosition(it, x, y) }
+        }
+    }
+
+    /** 드래그를 놓았을 때 붙일 위치 계산: 가까운 다른 버튼에 붙거나, 가장 가까운 벽에 붙는다. */
+    private fun computeSnap(b: Bubble): Pair<Int, Int> {
+        val (w, h) = screenSize()
+        val size = b.lp.width
+        val gap = dp(2)
+        val cx = b.lp.x + size / 2
+        val cy = b.lp.y + size / 2
+
+        // 1) 다른 버튼 근처면 그 버튼에 세로로 붙여 정렬
+        for (ob in bubbles) {
+            if (ob === b) continue
+            val ocx = ob.lp.x + ob.lp.width / 2
+            val ocy = ob.lp.y + ob.lp.height / 2
+            if (abs(cx - ocx) < size && abs(cy - ocy) < size * 1.5f) {
+                val x = ob.lp.x
+                val below = b.lp.y >= ob.lp.y
+                val y = if (below) ob.lp.y + ob.lp.height + gap else ob.lp.y - size - gap
+                return x.coerceIn(0, (w - size).coerceAtLeast(0)) to
+                    y.coerceIn(0, (h - size).coerceAtLeast(0))
+            }
+        }
+
+        // 2) 가장 가까운 벽에 붙이기
+        val dl = b.lp.x
+        val dr = w - (b.lp.x + size)
+        val dt = b.lp.y
+        val db = h - (b.lp.y + size)
+        return when (minOf(dl, dr, dt, db)) {
+            dl -> 0 to b.lp.y
+            dr -> (w - size).coerceAtLeast(0) to b.lp.y
+            dt -> b.lp.x to 0
+            else -> b.lp.x to (h - size).coerceAtLeast(0)
+        }
+    }
+
+    private fun animateTo(b: Bubble, tx: Int, ty: Int) {
+        val sx = b.lp.x
+        val sy = b.lp.y
+        if (sx == tx && sy == ty) return
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 160
+            interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener { a ->
+                val f = a.animatedValue as Float
+                b.lp.x = (sx + (tx - sx) * f).roundToInt()
+                b.lp.y = (sy + (ty - sy) * f).roundToInt()
+                runCatching { wm.updateViewLayout(b.frame, b.lp) }
+            }
+            start()
         }
     }
 
