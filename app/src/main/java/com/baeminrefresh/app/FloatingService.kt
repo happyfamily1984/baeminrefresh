@@ -215,8 +215,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         bubbles.add(b)
         runCatching { wm.addView(b.frame, b.lp) }
 
-        if (sticker.x < 0 || sticker.y < 0) defaultStickerPosition(b)
-        else clampAndApply(b, sticker.x, sticker.y)
+        val desired = if (sticker.x < 0 || sticker.y < 0) autoStickerPos(b) else (sticker.x to sticker.y)
+        val (cx, cy) = resolveCollision(b, desired.first, desired.second)
+        clampAndApply(b, cx, cy)
     }
 
     private fun newLayoutParams(sizePx: Int) = WindowManager.LayoutParams(
@@ -243,13 +244,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         clampAndApply(b, w - size - dp(12), (h * 0.6f).roundToInt())
     }
 
-    private fun defaultStickerPosition(b: Bubble) {
+    private fun autoStickerPos(b: Bubble): Pair<Int, Int> {
         // 스티커는 왼쪽에 세로로 쌓이게
         val (_, h) = screenSize()
         val size = dp(prefs.buttonSizeDp)
         val index = bubbles.count { !it.isRestart } - 1
         val y = (h * 0.3f).roundToInt() + index * (size + dp(10))
-        clampAndApply(b, dp(12), y)
+        return dp(12) to y
     }
 
     private fun clampAndApply(b: Bubble, x: Int, y: Int) {
@@ -303,7 +304,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                     v.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
                     if (dragging) {
                         v.alpha = prefs.buttonAlpha / 100f
-                        val (tx, ty) = computeSnap(bubble)
+                        val (sx, sy) = computeSnap(bubble)
+                        val (tx, ty) = resolveCollision(bubble, sx, sy)
                         savePositionAt(bubble, tx, ty)
                         animateTo(bubble, tx, ty)
                     } else if (SystemClock.uptimeMillis() - downAt >= LONG_PRESS_MS) {
@@ -354,6 +356,31 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             dt -> b.lp.x to 0
             else -> b.lp.x to (h - size).coerceAtLeast(0)
         }
+    }
+
+    /** 주어진 위치가 다른 버튼과 겹치면, 겹치지 않는 가장 가까운 자리로(주로 위/아래로) 밀어낸다. */
+    private fun resolveCollision(b: Bubble, x: Int, y: Int): Pair<Int, Int> {
+        val (_, h) = screenSize()
+        val size = b.lp.width
+        val gap = dp(6)
+        val others = bubbles.filter { it !== b }
+
+        fun overlaps(px: Int, py: Int): Boolean = others.any {
+            abs(px - it.lp.x) < size + gap && abs(py - it.lp.y) < size + gap
+        }
+        if (!overlaps(x, y)) return x to y
+
+        val maxY = (h - size).coerceAtLeast(0)
+        var offset = gap
+        while (offset <= h) {
+            val down = (y + offset).coerceAtMost(maxY)
+            if (!overlaps(x, down)) return x to down
+            val up = (y - offset).coerceAtLeast(0)
+            if (!overlaps(x, up)) return x to up
+            if (down == maxY && up == 0) break
+            offset += gap
+        }
+        return x to y
     }
 
     private fun animateTo(b: Bubble, tx: Int, ty: Int) {
