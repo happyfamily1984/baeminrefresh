@@ -331,34 +331,24 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
-    /** 드래그를 놓았을 때 붙일 위치 계산: 가까운 다른 버튼에 붙거나, 가장 가까운 벽에 붙는다. */
+    /**
+     * 드래그를 놓았을 때 붙일 위치 계산.
+     * 벽(상/하/좌/우)에 아이콘 반 크기(약 25dp)보다 가까울 때만 그 벽에 붙이고,
+     * 그보다 멀면(화면 중앙 등) 놓은 자리에 그대로 둔다. 아이콘끼리는 붙이지 않는다.
+     */
     private fun computeSnap(b: Bubble): Pair<Int, Int> {
         val (w, h) = screenSize()
         val size = b.lp.width
-        val gap = dp(2)
-        val cx = b.lp.x + size / 2
-        val cy = b.lp.y + size / 2
+        val threshold = dp(prefs.buttonSizeDp / 2)
 
-        // 1) 다른 버튼 근처면 그 버튼에 세로로 붙여 정렬
-        for (ob in bubbles) {
-            if (ob === b) continue
-            val ocx = ob.lp.x + ob.lp.width / 2
-            val ocy = ob.lp.y + ob.lp.height / 2
-            if (abs(cx - ocx) < size && abs(cy - ocy) < size * 1.5f) {
-                val x = ob.lp.x
-                val below = b.lp.y >= ob.lp.y
-                val y = if (below) ob.lp.y + ob.lp.height + gap else ob.lp.y - size - gap
-                return x.coerceIn(0, (w - size).coerceAtLeast(0)) to
-                    y.coerceIn(0, (h - size).coerceAtLeast(0))
-            }
-        }
-
-        // 2) 가장 가까운 벽에 붙이기
         val dl = b.lp.x
         val dr = w - (b.lp.x + size)
         val dt = b.lp.y
         val db = h - (b.lp.y + size)
-        return when (minOf(dl, dr, dt, db)) {
+        val min = minOf(dl, dr, dt, db)
+        if (min > threshold) return b.lp.x to b.lp.y // 벽에서 멀면 그대로
+
+        return when (min) {
             dl -> 0 to b.lp.y
             dr -> (w - size).coerceAtLeast(0) to b.lp.y
             dt -> b.lp.x to 0
