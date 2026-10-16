@@ -341,7 +341,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun computeSnap(b: Bubble): Pair<Int, Int> {
         val (w, h) = screenSize()
         val size = b.lp.width
-        val threshold = dp(prefs.buttonSizeDp / 2)
+        val threshold = dp(prefs.buttonSizeDp)
 
         val dl = b.lp.x
         val dr = w - (b.lp.x + size)
