@@ -42,6 +42,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_WELCOME, false)
         set(value) = sp.edit().putBoolean(KEY_WELCOME, value).apply()
 
+    /** 실험실: 가로모드로 바뀌면 앱 스티커를 일시적으로 숨기고, 세로로 돌아오면 다시 표시 */
+    var labPauseStickersLandscape: Boolean
+        get() = sp.getBoolean(KEY_LAB_PAUSE_LANDSCAPE, false)
+        set(value) = sp.edit().putBoolean(KEY_LAB_PAUSE_LANDSCAPE, value).apply()
+
     fun resetPosition() {
         sp.edit().remove(KEY_X).remove(KEY_Y).apply()
     }
@@ -97,6 +102,7 @@ class Prefs(context: Context) {
         const val KEY_Y = "pos_y"
         const val KEY_WELCOME = "welcome_shown"
         const val KEY_STICKERS = "app_stickers"
+        const val KEY_LAB_PAUSE_LANDSCAPE = "lab_pause_stickers_landscape"
 
         const val MIN_SIZE_DP = 40
         const val DEFAULT_SIZE_DP = 51

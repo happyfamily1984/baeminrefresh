@@ -65,6 +65,12 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<MaterialButton>(R.id.add_sticker_button).setOnClickListener { showStickerPicker() }
 
+        val labSwitch = findViewById<MaterialSwitch>(R.id.lab_landscape_switch)
+        labSwitch.isChecked = prefs.labPauseStickersLandscape
+        labSwitch.setOnCheckedChangeListener { _, checked ->
+            prefs.labPauseStickersLandscape = checked
+        }
+
         if (!prefs.welcomeShown) showWelcome()
     }
 

@@ -84,7 +84,12 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // 화면 회전 시 버튼들이 화면 밖으로 나가지 않게
+        val landscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        // 실험실: 가로모드에서는 앱 스티커를 숨기고, 세로로 돌아오면 다시 표시
+        if (prefs.labPauseStickersLandscape) {
+            if (landscape) removeStickerBubbles() else showStickerBubbles()
+        }
+        // 남은 버튼들이 화면 밖으로 나가지 않게
         for (b in bubbles) clampAndApply(b, b.lp.x, b.lp.y)
     }
 
@@ -95,8 +100,14 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 if (prefs.posX < 0) defaultPosition(b) else clampAndApply(b, prefs.posX, prefs.posY)
             }
             Prefs.KEY_STICKERS -> rebuildStickers()
+            Prefs.KEY_LAB_PAUSE_LANDSCAPE ->
+                if (prefs.labPauseStickersLandscape && isLandscape()) removeStickerBubbles()
+                else showStickerBubbles()
         }
     }
+
+    private fun isLandscape(): Boolean =
+        resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     // ---------------- 알림 / 포그라운드 ----------------
 
@@ -138,17 +149,29 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun buildAll() {
         removeAllBubbles()
         addRestartBubble()
-        for (s in prefs.getStickers()) addStickerBubble(s)
+        if (!stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
     }
 
     private fun rebuildStickers() {
-        // 스티커 버튼만 다시 그린다 (재시작 버튼은 유지)
+        removeStickerBubbles()
+        if (!stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
+    }
+
+    /** 실험실 설정이 켜져 있고 지금 가로모드면 스티커를 띄우지 않는다. */
+    private fun stickersPaused(): Boolean = prefs.labPauseStickersLandscape && isLandscape()
+
+    private fun removeStickerBubbles() {
         val toRemove = bubbles.filter { !it.isRestart }
         for (b in toRemove) {
             b.spinner?.cancel()
             runCatching { wm.removeView(b.frame) }
         }
         bubbles.removeAll(toRemove)
+    }
+
+    /** 스티커가 하나도 없으면 저장된 스티커를 다시 띄운다. */
+    private fun showStickerBubbles() {
+        if (bubbles.any { !it.isRestart }) return
         for (s in prefs.getStickers()) addStickerBubble(s)
     }
 
