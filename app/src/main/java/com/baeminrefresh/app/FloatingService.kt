@@ -89,8 +89,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         if (prefs.labPauseStickersLandscape) {
             if (landscape) removeStickerBubbles() else showStickerBubbles()
         }
-        // 남은 버튼들이 화면 밖으로 나가지 않게
-        for (b in bubbles) clampAndApply(b, b.lp.x, b.lp.y)
+        // 저장된 자리로 되돌린 뒤 서로 겹치지 않게 재배치 (회전 시 겹침 방지)
+        repositionAll()
     }
 
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
@@ -262,9 +262,35 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     private fun defaultPosition(b: Bubble) {
+        val (x, y) = defaultRestartPos()
+        clampAndApply(b, x, y)
+    }
+
+    private fun defaultRestartPos(): Pair<Int, Int> {
         val (w, h) = screenSize()
         val size = dp(prefs.buttonSizeDp)
-        clampAndApply(b, w - size - dp(12), (h * 0.6f).roundToInt())
+        return (w - size - dp(12)) to (h * 0.6f).roundToInt()
+    }
+
+    /** 각 버튼의 저장된 위치(없으면 기본 위치). */
+    private fun savedPosOf(b: Bubble): Pair<Int, Int> {
+        return if (b.isRestart) {
+            if (prefs.posX < 0 || prefs.posY < 0) defaultRestartPos() else prefs.posX to prefs.posY
+        } else {
+            val s = prefs.getStickers().firstOrNull { it.packageName == b.launchPkg }
+            if (s == null || s.x < 0 || s.y < 0) autoStickerPos(b) else s.x to s.y
+        }
+    }
+
+    /** 회전 등으로 다시 배치: 저장된 자리로 되돌린 뒤 서로 겹치지 않게 벌린다. */
+    private fun repositionAll() {
+        val done = mutableListOf<Bubble>()
+        for (b in bubbles) {
+            val (sx, sy) = savedPosOf(b)
+            val (x, y) = resolveCollisionAgainst(b, sx, sy, done)
+            clampAndApply(b, x, y)
+            done.add(b)
+        }
     }
 
     private fun autoStickerPos(b: Bubble): Pair<Int, Int> {
@@ -399,11 +425,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     /** 주어진 위치가 다른 버튼과 겹치면, 겹치지 않는 가장 가까운 자리로(주로 위/아래로) 밀어낸다. */
-    private fun resolveCollision(b: Bubble, x: Int, y: Int): Pair<Int, Int> {
+    private fun resolveCollision(b: Bubble, x: Int, y: Int): Pair<Int, Int> =
+        resolveCollisionAgainst(b, x, y, bubbles.filter { it !== b })
+
+    private fun resolveCollisionAgainst(b: Bubble, x: Int, y: Int, others: List<Bubble>): Pair<Int, Int> {
         val (_, h) = screenSize()
         val size = b.lp.width
         val gap = dp(6)
-        val others = bubbles.filter { it !== b }
 
         fun overlaps(px: Int, py: Int): Boolean = others.any {
             abs(px - it.lp.x) < size + gap && abs(py - it.lp.y) < size + gap
