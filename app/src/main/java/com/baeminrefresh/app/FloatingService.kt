@@ -37,6 +37,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private lateinit var wm: WindowManager
     private lateinit var prefs: Prefs
+    private var overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
     /** launchPkg == null 이면 배민커넥트 재시작 버튼, 아니면 해당 앱을 실행하는 스티커 */
     private inner class Bubble(val launchPkg: String?) {
@@ -53,8 +54,17 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     override fun onCreate() {
         super.onCreate()
-        wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         prefs = Prefs(this)
+        // 접근성 서비스가 켜져 있으면, 접근성 오버레이로 그린다.
+        // 접근성 오버레이는 통화 화면 등에서 일반 오버레이를 숨기는 동작을 통과한다.
+        val ax = RestartAccessibilityService.instance
+        if (ax != null) {
+            wm = ax.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            overlayType = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        }
         startAsForeground()
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "'다른 앱 위에 표시' 권한이 필요해요", Toast.LENGTH_LONG).show()
@@ -203,7 +213,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         b.frame.alpha = prefs.buttonAlpha / 100f
         b.frame.setOnTouchListener(DragTouchListener(b))
         bubbles.add(b)
-        runCatching { wm.addView(b.frame, b.lp) }
+        addOverlayView(b)
 
         if (prefs.posX < 0 || prefs.posY < 0) defaultPosition(b)
         else clampAndApply(b, prefs.posX, prefs.posY)
@@ -236,7 +246,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         b.frame.alpha = prefs.buttonAlpha / 100f
         b.frame.setOnTouchListener(DragTouchListener(b))
         bubbles.add(b)
-        runCatching { wm.addView(b.frame, b.lp) }
+        addOverlayView(b)
 
         val desired = if (sticker.x < 0 || sticker.y < 0) autoStickerPos(b) else (sticker.x to sticker.y)
         val (cx, cy) = resolveCollision(b, desired.first, desired.second)
@@ -245,11 +255,25 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun newLayoutParams(sizePx: Int) = WindowManager.LayoutParams(
         sizePx, sizePx,
-        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        overlayType,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
         PixelFormat.TRANSLUCENT
     ).apply { gravity = Gravity.TOP or Gravity.START }
+
+    /** 버튼 창을 올린다. 접근성 오버레이가 거부되면 일반 오버레이로 되돌려 다시 시도한다. */
+    private fun addOverlayView(b: Bubble) {
+        try {
+            wm.addView(b.frame, b.lp)
+        } catch (e: Exception) {
+            if (overlayType != WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY) {
+                overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                b.lp.type = overlayType
+                runCatching { wm.addView(b.frame, b.lp) }
+            }
+        }
+    }
 
     private fun applyAppearance(b: Bubble) {
         val sizePx = dp(prefs.buttonSizeDp)
