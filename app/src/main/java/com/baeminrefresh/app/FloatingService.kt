@@ -329,6 +329,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     private fun resetPee() {
+        prefs.bumpPeeCount()
         prefs.peeLastReset = System.currentTimeMillis()
         updatePeeDisplay()
         updatePeeNotification()
@@ -373,14 +374,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     /** 알림용 긴 표기 */
     private fun peeElapsedLong(): String {
-        if (prefs.peeLastReset <= 0L) return "아직 기록 없음 — 버튼을 누르면 시작돼요"
+        val count = prefs.peeCountToday
+        if (prefs.peeLastReset <= 0L) return "오늘 ${count}회 — 버튼을 누르면 시작돼요"
         val total = peeElapsedMillis() / 1000
         val h = total / 3600
         val m = (total % 3600) / 60
-        return when {
-            h > 0 -> "마지막 리셋 후 ${h}시간 ${m}분 지남"
-            else -> "마지막 리셋 후 ${m}분 지남"
-        }
+        val elapsed = if (h > 0) "${h}시간 ${m}분" else "${m}분"
+        return "오늘 ${count}회 · 마지막 후 $elapsed"
     }
 
     private fun updatePeeNotification() {
@@ -401,12 +401,14 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             this, 3, Intent(this, FloatingService::class.java).setAction(ACTION_PEE_RESET),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val count = prefs.peeCountToday
         val n = NotificationCompat.Builder(this, PEE_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_water_splash)
-            .setContentTitle("💧 워터 타이머")
+            .setContentTitle("💧 워터 타이머 · 오늘 ${count}회")
             .setContentText(peeElapsedLong())
             .setContentIntent(open)
             .addAction(0, "지금 리셋", reset)
+            .setNumber(count)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

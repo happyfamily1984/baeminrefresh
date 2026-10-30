@@ -57,6 +57,19 @@ class Prefs(context: Context) {
         get() = sp.getLong(KEY_PEE_LAST, 0L)
         set(value) = sp.edit().putLong(KEY_PEE_LAST, value).apply()
 
+    /** 오늘 워터 횟수 (날짜가 바뀌면 0부터) */
+    val peeCountToday: Int
+        get() = if (sp.getString(KEY_PEE_COUNT_DATE, "") == today()) sp.getInt(KEY_PEE_COUNT, 0) else 0
+
+    /** 워터 1회 기록 (오늘 횟수 +1) */
+    fun bumpPeeCount() {
+        val t = today()
+        val c = if (sp.getString(KEY_PEE_COUNT_DATE, "") == t) sp.getInt(KEY_PEE_COUNT, 0) else 0
+        sp.edit().putString(KEY_PEE_COUNT_DATE, t).putInt(KEY_PEE_COUNT, c + 1).apply()
+    }
+
+    private fun today(): String = java.time.LocalDate.now().toString()
+
     fun resetPosition() {
         sp.edit().remove(KEY_X).remove(KEY_Y).apply()
     }
@@ -115,6 +128,8 @@ class Prefs(context: Context) {
         const val KEY_LAB_PAUSE_LANDSCAPE = "lab_pause_stickers_landscape"
         const val KEY_PEE_ENABLED = "pee_tracker_enabled"
         const val KEY_PEE_LAST = "pee_last_reset"
+        const val KEY_PEE_COUNT = "pee_count"
+        const val KEY_PEE_COUNT_DATE = "pee_count_date"
 
         const val MIN_SIZE_DP = 40
         const val DEFAULT_SIZE_DP = 51
