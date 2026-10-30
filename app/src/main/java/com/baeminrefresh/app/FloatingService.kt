@@ -89,6 +89,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             resetPee()
             return START_STICKY
         }
+        if (intent?.action == ACTION_WATER_MODE) {
+            prefs.waterModeEnabled = !prefs.waterModeEnabled // 리스너가 buildAll() 실행
+            updatePeeNotification()
+            return START_STICKY
+        }
         return START_STICKY
     }
 
@@ -423,6 +428,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             this, 3, Intent(this, FloatingService::class.java).setAction(ACTION_PEE_RESET),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val waterMode = PendingIntent.getService(
+            this, 4, Intent(this, FloatingService::class.java).setAction(ACTION_WATER_MODE),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val waterLabel = if (prefs.waterModeEnabled) "워터 모드 끄기" else "워터 모드 켜기"
         val count = prefs.peeCountToday
         val n = NotificationCompat.Builder(this, PEE_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_water_splash)
@@ -430,6 +440,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             .setContentText(peeElapsedLong())
             .setContentIntent(open)
             .addAction(0, "지금 리셋", reset)
+            .addAction(0, waterLabel, waterMode)
             .setNumber(count)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -777,6 +788,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val PEE_NOTIFICATION_ID = 2
         private const val ACTION_STOP = "com.baeminrefresh.app.STOP"
         private const val ACTION_PEE_RESET = "com.baeminrefresh.app.PEE_RESET"
+        private const val ACTION_WATER_MODE = "com.baeminrefresh.app.WATER_MODE"
         private const val LONG_PRESS_MS = 600L
 
         @Volatile
