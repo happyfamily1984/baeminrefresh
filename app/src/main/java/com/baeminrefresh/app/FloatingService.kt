@@ -41,7 +41,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private var overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
     /** launchPkg == null 이면 배민커넥트 재시작 버튼, 아니면 해당 앱을 실행하는 스티커.
-     * pee == true 면 소변 타이머 버튼. */
+     * pee == true 면 워터 타이머 버튼. */
     private inner class Bubble(val launchPkg: String?, val pee: Boolean = false) {
         lateinit var frame: FrameLayout
         lateinit var iv: ImageView
@@ -283,7 +283,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         clampAndApply(b, cx, cy)
     }
 
-    // ---------------- 소변 타이머 (개인 실험 기능) ----------------
+    // ---------------- 워터 타이머 (개인 실험 기능) ----------------
 
     private fun addPeeBubble() {
         if (bubbles.any { it.pee }) return
@@ -332,7 +332,6 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         prefs.peeLastReset = System.currentTimeMillis()
         updatePeeDisplay()
         updatePeeNotification()
-        toast("소변 타이머를 0부터 다시 셉니다")
     }
 
     private fun updatePeeDisplay() {
@@ -379,8 +378,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val h = total / 3600
         val m = (total % 3600) / 60
         return when {
-            h > 0 -> "마지막 소변 후 ${h}시간 ${m}분 지남"
-            else -> "마지막 소변 후 ${m}분 지남"
+            h > 0 -> "마지막 리셋 후 ${h}시간 ${m}분 지남"
+            else -> "마지막 리셋 후 ${m}분 지남"
         }
     }
 
@@ -388,8 +387,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(
-                NotificationChannel(PEE_CHANNEL_ID, "소변 타이머", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "마지막 소변 후 경과 시간"
+                NotificationChannel(PEE_CHANNEL_ID, "워터 타이머", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "마지막 리셋 후 경과 시간"
                     setShowBadge(false)
                 }
             )
@@ -404,7 +403,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         )
         val n = NotificationCompat.Builder(this, PEE_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_water_splash)
-            .setContentTitle("💧 소변 타이머")
+            .setContentTitle("💧 워터 타이머")
             .setContentText(peeElapsedLong())
             .setContentIntent(open)
             .addAction(0, "지금 리셋", reset)

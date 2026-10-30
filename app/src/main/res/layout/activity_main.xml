@@ -344,7 +344,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="💧 소변 타이머 (개인용)"
+                                android:text="💧 워터 타이머 (개인용)"
                                 android:textColor="@color/text_main"
                                 android:textSize="16sp"
                                 android:textStyle="bold" />
@@ -354,7 +354,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
                                 android:lineSpacingExtra="2dp"
-                                android:text="물방울 버튼을 누르면 0부터 다시 세요. 버튼과 상단 알림에 마지막 소변 후 경과 시간이 표시돼요."
+                                android:text="물방울 버튼을 누르면 0부터 다시 세요. 버튼과 상단 알림에 마지막 리셋 후 경과 시간이 표시돼요."
                                 android:textColor="@color/text_sub"
                                 android:textSize="13sp" />
                         </LinearLayout>

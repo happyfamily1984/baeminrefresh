@@ -84,7 +84,6 @@ class MainActivity : AppCompatActivity() {
             }
             findViewById<MaterialButton>(R.id.pee_reset_button).setOnClickListener {
                 prefs.peeLastReset = System.currentTimeMillis()
-                Toast.makeText(this, "소변 타이머를 0부터 다시 셉니다", Toast.LENGTH_SHORT).show()
             }
         }
 

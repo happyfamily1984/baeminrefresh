@@ -47,7 +47,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_LAB_PAUSE_LANDSCAPE, false)
         set(value) = sp.edit().putBoolean(KEY_LAB_PAUSE_LANDSCAPE, value).apply()
 
-    /** 실험실(개인용): 소변 타이머 — 버튼을 누르면 리셋되고 경과 시간을 표시 */
+    /** 실험실(개인용): 워터 타이머 — 버튼을 누르면 리셋되고 경과 시간을 표시 */
     var peeTrackerEnabled: Boolean
         get() = sp.getBoolean(KEY_PEE_ENABLED, false)
         set(value) = sp.edit().putBoolean(KEY_PEE_ENABLED, value).apply()
