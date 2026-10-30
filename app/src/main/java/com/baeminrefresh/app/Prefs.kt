@@ -47,6 +47,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_LAB_PAUSE_LANDSCAPE, false)
         set(value) = sp.edit().putBoolean(KEY_LAB_PAUSE_LANDSCAPE, value).apply()
 
+    /** 실험실(개인용): 소변 타이머 — 버튼을 누르면 리셋되고 경과 시간을 표시 */
+    var peeTrackerEnabled: Boolean
+        get() = sp.getBoolean(KEY_PEE_ENABLED, false)
+        set(value) = sp.edit().putBoolean(KEY_PEE_ENABLED, value).apply()
+
+    /** 마지막으로 리셋한 시각(millis). 0이면 아직 기록 없음 */
+    var peeLastReset: Long
+        get() = sp.getLong(KEY_PEE_LAST, 0L)
+        set(value) = sp.edit().putLong(KEY_PEE_LAST, value).apply()
+
     fun resetPosition() {
         sp.edit().remove(KEY_X).remove(KEY_Y).apply()
     }
@@ -103,6 +113,8 @@ class Prefs(context: Context) {
         const val KEY_WELCOME = "welcome_shown"
         const val KEY_STICKERS = "app_stickers"
         const val KEY_LAB_PAUSE_LANDSCAPE = "lab_pause_stickers_landscape"
+        const val KEY_PEE_ENABLED = "pee_tracker_enabled"
+        const val KEY_PEE_LAST = "pee_last_reset"
 
         const val MIN_SIZE_DP = 40
         const val DEFAULT_SIZE_DP = 51

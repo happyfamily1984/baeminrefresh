@@ -71,6 +71,23 @@ class MainActivity : AppCompatActivity() {
             prefs.labPauseStickersLandscape = checked
         }
 
+        if (Features.PEE) {
+            findViewById<View>(R.id.pee_card).visibility = View.VISIBLE
+            val peeSwitch = findViewById<MaterialSwitch>(R.id.pee_switch)
+            peeSwitch.isChecked = prefs.peeTrackerEnabled
+            peeSwitch.setOnCheckedChangeListener { _, checked ->
+                if (checked && prefs.peeLastReset <= 0L) prefs.peeLastReset = System.currentTimeMillis()
+                prefs.peeTrackerEnabled = checked
+                if (checked && !FloatingService.isRunning) {
+                    Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 물방울 버튼이 나타나요", Toast.LENGTH_LONG).show()
+                }
+            }
+            findViewById<MaterialButton>(R.id.pee_reset_button).setOnClickListener {
+                prefs.peeLastReset = System.currentTimeMillis()
+                Toast.makeText(this, "소변 타이머를 0부터 다시 셉니다", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         if (!prefs.welcomeShown) showWelcome()
     }
 

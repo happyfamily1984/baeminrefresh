@@ -26,6 +26,7 @@ import android.view.WindowManager
 import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -39,16 +40,26 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private lateinit var prefs: Prefs
     private var overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
-    /** launchPkg == null 이면 배민커넥트 재시작 버튼, 아니면 해당 앱을 실행하는 스티커 */
-    private inner class Bubble(val launchPkg: String?) {
+    /** launchPkg == null 이면 배민커넥트 재시작 버튼, 아니면 해당 앱을 실행하는 스티커.
+     * pee == true 면 소변 타이머 버튼. */
+    private inner class Bubble(val launchPkg: String?, val pee: Boolean = false) {
         lateinit var frame: FrameLayout
         lateinit var iv: ImageView
+        var tv: TextView? = null
         lateinit var lp: WindowManager.LayoutParams
         var spinner: ObjectAnimator? = null
-        val isRestart: Boolean get() = launchPkg == null
+        val isRestart: Boolean get() = launchPkg == null && !pee
+        val isSticker: Boolean get() = launchPkg != null
     }
 
     private val bubbles = mutableListOf<Bubble>()
+    private val peeHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val peeTick = object : Runnable {
+        override fun run() {
+            updatePeeDisplay()
+            peeHandler.postDelayed(this, 1000L)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -82,12 +93,18 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_PEE_RESET) {
+            resetPee()
+            return START_STICKY
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
         isRunning = false
         prefs.unregisterListener(this)
+        peeHandler.removeCallbacks(peeTick)
+        cancelPeeNotification()
         removeAllBubbles()
         super.onDestroy()
     }
@@ -113,7 +130,18 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             Prefs.KEY_LAB_PAUSE_LANDSCAPE ->
                 if (prefs.labPauseStickersLandscape && isLandscape()) removeStickerBubbles()
                 else showStickerBubbles()
+            Prefs.KEY_PEE_ENABLED -> {
+                if (Features.PEE && prefs.peeTrackerEnabled) addPeeBubble() else removePeeBubble()
+                updatePeeState()
+            }
+            Prefs.KEY_PEE_LAST -> updatePeeDisplay()
         }
+    }
+
+    private fun removePeeBubble() {
+        val toRemove = bubbles.filter { it.pee }
+        for (b in toRemove) runCatching { wm.removeView(b.frame) }
+        bubbles.removeAll(toRemove)
     }
 
     private fun isLandscape(): Boolean =
@@ -160,6 +188,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         removeAllBubbles()
         addRestartBubble()
         if (!stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
+        if (Features.PEE && prefs.peeTrackerEnabled) addPeeBubble()
+        updatePeeState()
     }
 
     private fun rebuildStickers() {
@@ -171,7 +201,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun stickersPaused(): Boolean = prefs.labPauseStickersLandscape && isLandscape()
 
     private fun removeStickerBubbles() {
-        val toRemove = bubbles.filter { !it.isRestart }
+        val toRemove = bubbles.filter { it.isSticker }
         for (b in toRemove) {
             b.spinner?.cancel()
             runCatching { wm.removeView(b.frame) }
@@ -181,7 +211,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     /** 스티커가 하나도 없으면 저장된 스티커를 다시 띄운다. */
     private fun showStickerBubbles() {
-        if (bubbles.any { !it.isRestart }) return
+        if (bubbles.any { it.isSticker }) return
         for (s in prefs.getStickers()) addStickerBubble(s)
     }
 
@@ -253,6 +283,144 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         clampAndApply(b, cx, cy)
     }
 
+    // ---------------- 소변 타이머 (개인 실험 기능) ----------------
+
+    private fun addPeeBubble() {
+        if (bubbles.any { it.pee }) return
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(null, pee = true)
+        b.iv = ImageView(this).apply {
+            setImageResource(R.drawable.ic_water_splash)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            alpha = 0.9f
+        }
+        b.tv = TextView(this).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 10f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            maxLines = 1
+        }
+        b.frame = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xFF2AA7E0.toInt())
+                setStroke(dp(2), 0xFFFFFFFF.toInt())
+            }
+            elevation = dp(6).toFloat()
+            addView(b.iv, FrameLayout.LayoutParams(sizePx / 2, sizePx / 2, Gravity.CENTER or Gravity.TOP).apply {
+                topMargin = dp(5)
+            })
+            addView(b.tv, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER or Gravity.BOTTOM).apply {
+                bottomMargin = dp(5)
+            })
+        }
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+
+        // 기본 위치: 왼쪽 아래
+        val (_, h) = screenSize()
+        val (cx, cy) = resolveCollision(b, dp(12), (h * 0.75f).roundToInt())
+        clampAndApply(b, cx, cy)
+        updatePeeDisplay()
+    }
+
+    private fun resetPee() {
+        prefs.peeLastReset = System.currentTimeMillis()
+        updatePeeDisplay()
+        updatePeeNotification()
+        toast("소변 타이머를 0부터 다시 셉니다")
+    }
+
+    private fun updatePeeDisplay() {
+        val text = peeElapsedShort()
+        bubbles.firstOrNull { it.pee }?.tv?.text = text
+        // 알림은 1초마다가 아니라 분 단위가 바뀔 때만 갱신
+        val now = System.currentTimeMillis()
+        if (now - lastPeeNotifyAt >= 30_000L) {
+            updatePeeNotification()
+            lastPeeNotifyAt = now
+        }
+    }
+
+    /** 틱/알림 시작·종료를 현재 상태에 맞춘다. */
+    private fun updatePeeState() {
+        peeHandler.removeCallbacks(peeTick)
+        if (Features.PEE && prefs.peeTrackerEnabled && bubbles.any { it.pee }) {
+            peeHandler.post(peeTick)
+            updatePeeNotification()
+        } else {
+            cancelPeeNotification()
+        }
+    }
+
+    private fun peeElapsedMillis(): Long {
+        val last = prefs.peeLastReset
+        if (last <= 0L) return 0L
+        return (System.currentTimeMillis() - last).coerceAtLeast(0L)
+    }
+
+    /** 버튼용 짧은 표기: 1시간 미만이면 M:SS, 이상이면 H:MM */
+    private fun peeElapsedShort(): String {
+        val total = peeElapsedMillis() / 1000
+        val h = total / 3600
+        val m = (total % 3600) / 60
+        val s = total % 60
+        return if (h > 0) String.format("%d:%02d", h, m) else String.format("%d:%02d", m, s)
+    }
+
+    /** 알림용 긴 표기 */
+    private fun peeElapsedLong(): String {
+        if (prefs.peeLastReset <= 0L) return "아직 기록 없음 — 버튼을 누르면 시작돼요"
+        val total = peeElapsedMillis() / 1000
+        val h = total / 3600
+        val m = (total % 3600) / 60
+        return when {
+            h > 0 -> "마지막 소변 후 ${h}시간 ${m}분 지남"
+            else -> "마지막 소변 후 ${m}분 지남"
+        }
+    }
+
+    private fun updatePeeNotification() {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(
+                NotificationChannel(PEE_CHANNEL_ID, "소변 타이머", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "마지막 소변 후 경과 시간"
+                    setShowBadge(false)
+                }
+            )
+        }
+        val open = PendingIntent.getActivity(
+            this, 2, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val reset = PendingIntent.getService(
+            this, 3, Intent(this, FloatingService::class.java).setAction(ACTION_PEE_RESET),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val n = NotificationCompat.Builder(this, PEE_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_water_splash)
+            .setContentTitle("💧 소변 타이머")
+            .setContentText(peeElapsedLong())
+            .setContentIntent(open)
+            .addAction(0, "지금 리셋", reset)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+        nm.notify(PEE_NOTIFICATION_ID, n)
+    }
+
+    private fun cancelPeeNotification() {
+        getSystemService(NotificationManager::class.java).cancel(PEE_NOTIFICATION_ID)
+    }
+
+    private var lastPeeNotifyAt = 0L
+
     private fun newLayoutParams(sizePx: Int) = WindowManager.LayoutParams(
         sizePx, sizePx,
         overlayType,
@@ -279,8 +447,14 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val sizePx = dp(prefs.buttonSizeDp)
         b.lp.width = sizePx
         b.lp.height = sizePx
-        val iconSize = if (b.isRestart) sizePx / 2 else sizePx - dp(1) * 2
-        b.iv.layoutParams = FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER)
+        if (b.pee) {
+            b.iv.layoutParams = FrameLayout.LayoutParams(sizePx / 2, sizePx / 2, Gravity.CENTER or Gravity.TOP).apply {
+                topMargin = dp(5)
+            }
+        } else {
+            val iconSize = if (b.isRestart) sizePx / 2 else sizePx - dp(1) * 2
+            b.iv.layoutParams = FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER)
+        }
         b.frame.alpha = prefs.buttonAlpha / 100f
         clampAndApply(b, b.lp.x, b.lp.y)
     }
@@ -321,7 +495,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         // 스티커는 왼쪽에 세로로 쌓이게
         val (_, h) = screenSize()
         val size = dp(prefs.buttonSizeDp)
-        val index = bubbles.count { !it.isRestart } - 1
+        val index = bubbles.count { it.isSticker } - 1
         val y = (h * 0.3f).roundToInt() + index * (size + dp(10))
         return dp(12) to y
     }
@@ -495,7 +669,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     // ---------------- 탭 동작 ----------------
 
     private fun onBubbleTapped(b: Bubble) {
-        if (b.isRestart) onRestartTapped(b) else launchApp(b.launchPkg!!)
+        when {
+            b.pee -> resetPee()
+            b.isRestart -> onRestartTapped(b)
+            else -> launchApp(b.launchPkg!!)
+        }
     }
 
     private fun launchApp(pkg: String) {
@@ -572,7 +750,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     companion object {
         private const val CHANNEL_ID = "floating"
         private const val NOTIFICATION_ID = 1
+        private const val PEE_CHANNEL_ID = "pee_timer"
+        private const val PEE_NOTIFICATION_ID = 2
         private const val ACTION_STOP = "com.baeminrefresh.app.STOP"
+        private const val ACTION_PEE_RESET = "com.baeminrefresh.app.PEE_RESET"
         private const val LONG_PRESS_MS = 600L
 
         @Volatile
