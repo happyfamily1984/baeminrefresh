@@ -590,7 +590,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                         savePositionAt(bubble, tx, ty)
                         animateTo(bubble, tx, ty)
                     } else if (SystemClock.uptimeMillis() - downAt >= LONG_PRESS_MS) {
-                        openSettingsScreen()
+                        if (bubble.pee) {
+                            // 물방울 길게 누르기 → 워터 모드 토글 (리스너가 buildAll)
+                            prefs.waterModeEnabled = !prefs.waterModeEnabled
+                            updatePeeNotification()
+                        } else {
+                            openSettingsScreen()
+                        }
                     } else {
                         v.performClick()
                         onBubbleTapped(bubble)
@@ -648,12 +654,27 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val min = minOf(dl, dr, dt, db)
         if (min > wallThreshold) return b.lp.x to b.lp.y
 
-        return when (min) {
-            dl -> 0 to b.lp.y
-            dr -> (w - size).coerceAtLeast(0) to b.lp.y
-            dt -> b.lp.x to 0
-            else -> b.lp.x to (h - size).coerceAtLeast(0)
+        var wx: Int
+        var wy: Int
+        when (min) {
+            dl -> { wx = 0; wy = b.lp.y }
+            dr -> { wx = (w - size).coerceAtLeast(0); wy = b.lp.y }
+            dt -> { wx = b.lp.x; wy = 0 }
+            else -> { wx = b.lp.x; wy = (h - size).coerceAtLeast(0) }
         }
+
+        // 좌/우 벽에 붙을 때, 반대편 벽의 버튼과 높이가 비슷하면 그 버튼과 줄(Y)을 맞춘다
+        val rightWall = (w - size).coerceAtLeast(0)
+        if (wx == 0 || wx == rightWall) {
+            val alignTh = dp(prefs.buttonSizeDp * 2 / 3)
+            val mate = bubbles.asSequence()
+                .filter { it !== b }
+                .filter { it.lp.x == 0 || it.lp.x == (w - it.lp.width).coerceAtLeast(0) } // 벽에 붙은 버튼
+                .filter { it.lp.x != wx } // 반대편 벽
+                .minByOrNull { abs(it.lp.y - wy) }
+            if (mate != null && abs(mate.lp.y - wy) <= alignTh) wy = mate.lp.y
+        }
+        return wx to wy
     }
 
     /** 주어진 위치가 다른 버튼과 겹치면, 겹치지 않는 가장 가까운 자리로(주로 위/아래로) 밀어낸다. */
