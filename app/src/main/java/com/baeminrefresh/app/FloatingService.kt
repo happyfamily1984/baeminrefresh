@@ -65,17 +65,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         prefs = Prefs(this)
-        // 접근성 서비스가 켜져 있으면, 접근성 오버레이로 그린다.
-        // 접근성 오버레이는 통화 화면 등에서 일반 오버레이를 숨기는 동작을 통과한다.
-        val ax = RestartAccessibilityService.instance
-        if (ax != null) {
-            wm = ax.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            overlayType = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
-        } else {
-            wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        }
+        pickOverlayHost()
         startAsForeground()
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "'다른 앱 위에 표시' 권한이 필요해요", Toast.LENGTH_LONG).show()
@@ -100,8 +92,34 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         return START_STICKY
     }
 
+    /** 접근성 서비스가 있으면 접근성 오버레이(통화 화면 통과)로, 없으면 일반 오버레이로. */
+    private fun pickOverlayHost() {
+        val ax = RestartAccessibilityService.instance
+        if (ax != null) {
+            wm = ax.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            overlayType = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        }
+    }
+
+    /** 접근성이 뒤늦게 연결/해제되면 오버레이 종류를 바꿔 다시 그린다. */
+    fun refreshOverlayType() {
+        if (!isRunning) return
+        val ax = RestartAccessibilityService.instance
+        val desired = if (ax != null) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        else WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        if (desired == overlayType) return
+        removeAllBubbles() // 기존 wm 으로 먼저 제거
+        peeHandler.removeCallbacks(peeTick)
+        pickOverlayHost() // wm / overlayType 전환
+        buildAll() // 새 오버레이로 다시 올림
+    }
+
     override fun onDestroy() {
         isRunning = false
+        if (instance === this) instance = null
         prefs.unregisterListener(this)
         peeHandler.removeCallbacks(peeTick)
         cancelPeeNotification()
@@ -759,6 +777,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
         @Volatile
         var isRunning = false
+            private set
+
+        @Volatile
+        var instance: FloatingService? = null
             private set
 
         fun start(context: Context) {

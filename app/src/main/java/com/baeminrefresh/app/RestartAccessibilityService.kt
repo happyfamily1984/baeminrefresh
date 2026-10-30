@@ -42,16 +42,20 @@ class RestartAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // 접근성이 연결되면, 떠 있는 플로팅 버튼을 접근성 오버레이로 다시 올려 통화 화면에서도 보이게
+        FloatingService.instance?.refreshOverlayType()
     }
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        FloatingService.instance?.refreshOverlayType()
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         if (instance === this) instance = null
+        FloatingService.instance?.refreshOverlayType()
         return super.onUnbind(intent)
     }
 
