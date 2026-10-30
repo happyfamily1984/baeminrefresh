@@ -85,6 +85,14 @@ class MainActivity : AppCompatActivity() {
             findViewById<MaterialButton>(R.id.pee_reset_button).setOnClickListener {
                 prefs.peeLastReset = System.currentTimeMillis()
             }
+            val waterModeSwitch = findViewById<MaterialSwitch>(R.id.water_mode_switch)
+            waterModeSwitch.isChecked = prefs.waterModeEnabled
+            waterModeSwitch.setOnCheckedChangeListener { _, checked ->
+                prefs.waterModeEnabled = checked
+                if (checked && !prefs.peeTrackerEnabled) {
+                    Toast.makeText(this, "워터 타이머를 켜야 물방울 버튼이 나와요", Toast.LENGTH_LONG).show()
+                }
+            }
         }
 
         if (!prefs.welcomeShown) showWelcome()

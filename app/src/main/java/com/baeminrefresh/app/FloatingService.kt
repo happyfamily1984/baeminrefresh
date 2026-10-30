@@ -148,10 +148,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             Prefs.KEY_LAB_PAUSE_LANDSCAPE ->
                 if (prefs.labPauseStickersLandscape && isLandscape()) removeStickerBubbles()
                 else showStickerBubbles()
-            Prefs.KEY_PEE_ENABLED -> {
-                if (Features.PEE && prefs.peeTrackerEnabled) addPeeBubble() else removePeeBubble()
-                updatePeeState()
-            }
+            Prefs.KEY_PEE_ENABLED, Prefs.KEY_WATER_MODE -> buildAll()
             Prefs.KEY_PEE_LAST -> updatePeeDisplay()
         }
     }
@@ -202,17 +199,23 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     // ---------------- 버튼 생성/제거 ----------------
 
+    /** 워터 모드: 물방울 버튼만 남기고 나머지는 숨긴다. (워터 타이머가 켜져 있을 때만) */
+    private fun waterOnly(): Boolean =
+        Features.PEE && prefs.peeTrackerEnabled && prefs.waterModeEnabled
+
     private fun buildAll() {
         removeAllBubbles()
-        addRestartBubble()
-        if (!stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
+        if (!waterOnly()) {
+            addRestartBubble()
+            if (!stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
+        }
         if (Features.PEE && prefs.peeTrackerEnabled) addPeeBubble()
         updatePeeState()
     }
 
     private fun rebuildStickers() {
         removeStickerBubbles()
-        if (!stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
+        if (!waterOnly() && !stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
     }
 
     /** 실험실 설정이 켜져 있고 지금 가로모드면 스티커를 띄우지 않는다. */
@@ -229,6 +232,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     /** 스티커가 하나도 없으면 저장된 스티커를 다시 띄운다. */
     private fun showStickerBubbles() {
+        if (waterOnly()) return
         if (bubbles.any { it.isSticker }) return
         for (s in prefs.getStickers()) addStickerBubble(s)
     }
