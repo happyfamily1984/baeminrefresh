@@ -331,7 +331,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         b.frame = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(0xFF2AA7E0.toInt())
+                setColor(PEE_COLOR_BLUE)
                 setStroke(dp(2), 0xFFFFFFFF.toInt())
             }
             elevation = dp(6).toFloat()
@@ -364,7 +364,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun updatePeeDisplay() {
         val text = peeElapsedShort()
-        bubbles.firstOrNull { it.pee }?.tv?.text = text
+        val pee = bubbles.firstOrNull { it.pee }
+        pee?.tv?.text = text
+        // 3시간 지나면 물방울을 황금색으로
+        val gold = prefs.peeLastReset > 0L && peeElapsedMillis() >= PEE_GOLD_MS
+        (pee?.frame?.background as? GradientDrawable)?.setColor(
+            if (gold) PEE_COLOR_GOLD else PEE_COLOR_BLUE
+        )
         // 알림은 1초마다가 아니라 분 단위가 바뀔 때만 갱신
         val now = System.currentTimeMillis()
         if (now - lastPeeNotifyAt >= 30_000L) {
@@ -811,6 +817,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val ACTION_PEE_RESET = "com.baeminrefresh.app.PEE_RESET"
         private const val ACTION_WATER_MODE = "com.baeminrefresh.app.WATER_MODE"
         private const val LONG_PRESS_MS = 600L
+        private const val PEE_GOLD_MS = 3L * 60 * 60 * 1000 // 3시간
+        private val PEE_COLOR_BLUE = 0xFF2AA7E0.toInt()
+        private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
 
         @Volatile
         var isRunning = false
