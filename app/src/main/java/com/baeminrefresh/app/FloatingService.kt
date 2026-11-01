@@ -348,11 +348,16 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         bubbles.add(b)
         addOverlayView(b)
 
-        // 기본 위치: 왼쪽 아래
-        val (_, h) = screenSize()
-        val (cx, cy) = resolveCollision(b, dp(12), (h * 0.75f).roundToInt())
+        val desired = if (prefs.peePosX < 0 || prefs.peePosY < 0) defaultPeePos()
+        else prefs.peePosX to prefs.peePosY
+        val (cx, cy) = resolveCollision(b, desired.first, desired.second)
         clampAndApply(b, cx, cy)
         updatePeeDisplay()
+    }
+
+    private fun defaultPeePos(): Pair<Int, Int> {
+        val (_, h) = screenSize()
+        return dp(12) to (h * 0.75f).roundToInt()
     }
 
     private fun resetPee() {
@@ -512,11 +517,15 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     /** 각 버튼의 저장된 위치(없으면 기본 위치). */
     private fun savedPosOf(b: Bubble): Pair<Int, Int> {
-        return if (b.isRestart) {
-            if (prefs.posX < 0 || prefs.posY < 0) defaultRestartPos() else prefs.posX to prefs.posY
-        } else {
-            val s = prefs.getStickers().firstOrNull { it.packageName == b.launchPkg }
-            if (s == null || s.x < 0 || s.y < 0) autoStickerPos(b) else s.x to s.y
+        return when {
+            b.isRestart ->
+                if (prefs.posX < 0 || prefs.posY < 0) defaultRestartPos() else prefs.posX to prefs.posY
+            b.pee ->
+                if (prefs.peePosX < 0 || prefs.peePosY < 0) defaultPeePos() else prefs.peePosX to prefs.peePosY
+            else -> {
+                val s = prefs.getStickers().firstOrNull { it.packageName == b.launchPkg }
+                if (s == null || s.x < 0 || s.y < 0) autoStickerPos(b) else s.x to s.y
+            }
         }
     }
 
@@ -618,11 +627,16 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     private fun savePositionAt(b: Bubble, x: Int, y: Int) {
-        if (b.isRestart) {
-            prefs.posX = x
-            prefs.posY = y
-        } else {
-            b.launchPkg?.let { prefs.updateStickerPosition(it, x, y) }
+        when {
+            b.isRestart -> {
+                prefs.posX = x
+                prefs.posY = y
+            }
+            b.pee -> {
+                prefs.peePosX = x
+                prefs.peePosY = y
+            }
+            else -> b.launchPkg?.let { prefs.updateStickerPosition(it, x, y) }
         }
     }
 

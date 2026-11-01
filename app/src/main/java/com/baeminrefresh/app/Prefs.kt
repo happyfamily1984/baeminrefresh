@@ -62,6 +62,15 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_WATER_MODE, false)
         set(value) = sp.edit().putBoolean(KEY_WATER_MODE, value).apply()
 
+    /** 물방울 버튼 위치 (-1이면 기본 위치) */
+    var peePosX: Int
+        get() = sp.getInt(KEY_PEE_X, -1)
+        set(value) = sp.edit().putInt(KEY_PEE_X, value).apply()
+
+    var peePosY: Int
+        get() = sp.getInt(KEY_PEE_Y, -1)
+        set(value) = sp.edit().putInt(KEY_PEE_Y, value).apply()
+
     /** 오늘 워터 횟수 (날짜가 바뀌면 0부터) */
     val peeCountToday: Int
         get() = if (sp.getString(KEY_PEE_COUNT_DATE, "") == today()) sp.getInt(KEY_PEE_COUNT, 0) else 0
@@ -136,6 +145,8 @@ class Prefs(context: Context) {
         const val KEY_PEE_COUNT = "pee_count"
         const val KEY_PEE_COUNT_DATE = "pee_count_date"
         const val KEY_WATER_MODE = "water_mode"
+        const val KEY_PEE_X = "pee_pos_x"
+        const val KEY_PEE_Y = "pee_pos_y"
 
         const val MIN_SIZE_DP = 40
         const val DEFAULT_SIZE_DP = 51
