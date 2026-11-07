@@ -64,6 +64,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.help_text).text = HELP_TEXT
 
         findViewById<MaterialButton>(R.id.add_sticker_button).setOnClickListener { showStickerPicker() }
+        findViewById<MaterialButton>(R.id.add_restart_app_button).setOnClickListener { showRestartAppPicker() }
 
         val labSwitch = findViewById<MaterialSwitch>(R.id.lab_landscape_switch)
         labSwitch.isChecked = prefs.labPauseStickersLandscape
@@ -105,6 +106,7 @@ class MainActivity : AppCompatActivity() {
         }
         refresh()
         renderStickers()
+        renderRestartApps()
     }
 
     // ---------------- 앱 스티커 ----------------
@@ -167,6 +169,72 @@ class MainActivity : AppCompatActivity() {
                 renderStickers()
                 if (!FloatingService.isRunning || !Settings.canDrawOverlays(this)) {
                     Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 스티커가 화면에 나타나요", Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    // ---------------- 리프레시 앱 ----------------
+
+    private fun renderRestartApps() {
+        val container = findViewById<LinearLayout>(R.id.restart_app_container)
+        container.removeAllViews()
+        val apps = prefs.getRestartApps()
+        if (apps.isEmpty()) return
+        val inflater = LayoutInflater.from(this)
+        for (a in apps) {
+            val label = TargetApps.labelOf(this, a.packageName)
+            val row = inflater.inflate(R.layout.item_sticker, container, false)
+            val iconView = row.findViewById<android.widget.ImageView>(R.id.sticker_icon)
+            try {
+                iconView.setImageDrawable(packageManager.getApplicationIcon(a.packageName))
+            } catch (e: Exception) {
+                iconView.setImageResource(R.drawable.ic_refresh)
+            }
+            row.findViewById<TextView>(R.id.sticker_label).text = label ?: a.packageName
+            row.findViewById<View>(R.id.sticker_remove).setOnClickListener {
+                prefs.removeRestartApp(a.packageName)
+                renderRestartApps()
+            }
+            container.addView(row)
+        }
+    }
+
+    private fun showRestartAppPicker() {
+        val existing = prefs.getRestartApps().map { it.packageName }.toSet()
+        val apps = TargetApps.launchableApps(this).filter { it.packageName !in existing }
+        if (apps.isEmpty()) {
+            Toast.makeText(this, "추가할 앱이 없어요", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val iconSize = (36 * resources.displayMetrics.density).toInt()
+        val pad = (12 * resources.displayMetrics.density).toInt()
+        val adapter = object : android.widget.ArrayAdapter<AppEntry>(
+            this, android.R.layout.select_dialog_item, android.R.id.text1, apps
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                val v = super.getView(position, convertView, parent)
+                val tv = v.findViewById<TextView>(android.R.id.text1)
+                tv.text = apps[position].label
+                val icon = try {
+                    packageManager.getApplicationIcon(apps[position].packageName)
+                } catch (e: Exception) {
+                    null
+                }
+                icon?.setBounds(0, 0, iconSize, iconSize)
+                tv.setCompoundDrawables(icon, null, null, null)
+                tv.compoundDrawablePadding = pad
+                return v
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle("재시작할 앱을 고르세요")
+            .setAdapter(adapter) { _, which ->
+                prefs.addRestartApp(apps[which].packageName)
+                renderRestartApps()
+                if (!FloatingService.isRunning || !Settings.canDrawOverlays(this)) {
+                    Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 재시작 버튼이 나타나요", Toast.LENGTH_LONG).show()
                 }
             }
             .setNegativeButton("취소", null)

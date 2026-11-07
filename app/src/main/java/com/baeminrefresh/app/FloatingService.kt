@@ -40,16 +40,25 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private lateinit var prefs: Prefs
     private var overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
-    /** launchPkg == null 이면 배민커넥트 재시작 버튼, 아니면 해당 앱을 실행하는 스티커.
-     * pee == true 면 워터 타이머 버튼. */
-    private inner class Bubble(val launchPkg: String?, val pee: Boolean = false) {
+    /**
+     * launchPkg != null → 해당 앱을 실행하는 스티커
+     * restart == true   → 재시작 버튼. restartPkg == null 이면 배민커넥트(기본), 값이 있으면 그 앱
+     * pee == true       → 워터 타이머 버튼
+     */
+    private inner class Bubble(
+        val launchPkg: String? = null,
+        val pee: Boolean = false,
+        val restart: Boolean = false,
+        val restartPkg: String? = null,
+    ) {
         lateinit var frame: FrameLayout
         lateinit var iv: ImageView
         var tv: TextView? = null
         lateinit var lp: WindowManager.LayoutParams
         var spinner: ObjectAnimator? = null
-        val isRestart: Boolean get() = launchPkg == null && !pee
+        val isRestart: Boolean get() = restart
         val isSticker: Boolean get() = launchPkg != null
+        val restartTarget: String? get() = restartPkg ?: prefs.targetPackage
     }
 
     private val bubbles = mutableListOf<Bubble>()
@@ -146,10 +155,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
         when (key) {
             Prefs.KEY_SIZE, Prefs.KEY_ALPHA -> bubbles.forEach { applyAppearance(it) }
-            Prefs.KEY_X, Prefs.KEY_Y -> bubbles.firstOrNull { it.isRestart }?.let { b ->
+            Prefs.KEY_X, Prefs.KEY_Y -> bubbles.firstOrNull { it.isRestart && it.restartPkg == null }?.let { b ->
                 if (prefs.posX < 0) defaultPosition(b) else clampAndApply(b, prefs.posX, prefs.posY)
             }
             Prefs.KEY_STICKERS -> rebuildStickers()
+            Prefs.KEY_RESTART_APPS -> buildAll()
             Prefs.KEY_LAB_PAUSE_LANDSCAPE ->
                 if (prefs.labPauseStickersLandscape && isLandscape()) removeStickerBubbles()
                 else showStickerBubbles()
@@ -212,6 +222,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         removeAllBubbles()
         if (!waterOnly()) {
             addRestartBubble()
+            for (a in prefs.getRestartApps()) addRestartAppBubble(a)
             if (!stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
         }
         if (Features.PEE && prefs.peeTrackerEnabled) addPeeBubble()
@@ -252,7 +263,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun addRestartBubble() {
         val sizePx = dp(prefs.buttonSizeDp)
-        val b = Bubble(null)
+        val b = Bubble(restart = true)
         b.iv = ImageView(this).apply {
             setImageResource(R.drawable.ic_refresh)
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -286,7 +297,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             return
         }
         val sizePx = dp(prefs.buttonSizeDp)
-        val b = Bubble(pkg)
+        val b = Bubble(launchPkg = pkg)
         b.iv = ImageView(this).apply {
             setImageDrawable(iconDrawable)
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -310,12 +321,58 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         clampAndApply(b, cx, cy)
     }
 
+    /** 특정 앱을 재시작하는 버튼 (앱 아이콘 + 재시작 뱃지) */
+    private fun addRestartAppBubble(app: Sticker) {
+        val pkg = app.packageName
+        val iconDrawable = try {
+            packageManager.getApplicationIcon(pkg)
+        } catch (e: Exception) {
+            prefs.removeRestartApp(pkg)
+            return
+        }
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(restart = true, restartPkg = pkg)
+        b.iv = ImageView(this).apply {
+            setImageDrawable(iconDrawable)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        // 재시작 버튼임을 알리는 작은 뱃지(민트 원 + 재시작 아이콘)
+        val badge = ImageView(this).apply {
+            setImageResource(R.drawable.ic_refresh)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(ContextCompat.getColor(this@FloatingService, R.color.mint))
+                setStroke(dp(1), 0xFFFFFFFF.toInt())
+            }
+            val p = dp(2)
+            setPadding(p, p, p, p)
+        }
+        b.frame = FrameLayout(this).apply {
+            elevation = dp(5).toFloat()
+            val pad = dp(1)
+            addView(b.iv, FrameLayout.LayoutParams(sizePx - pad * 2, sizePx - pad * 2, Gravity.CENTER))
+            addView(
+                badge,
+                FrameLayout.LayoutParams(dp(20), dp(20), Gravity.BOTTOM or Gravity.END)
+            )
+        }
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+
+        val desired = if (app.x < 0 || app.y < 0) autoStickerPos(b) else (app.x to app.y)
+        val (cx, cy) = resolveCollision(b, desired.first, desired.second)
+        clampAndApply(b, cx, cy)
+    }
+
     // ---------------- 워터 타이머 (개인 실험 기능) ----------------
 
     private fun addPeeBubble() {
         if (bubbles.any { it.pee }) return
         val sizePx = dp(prefs.buttonSizeDp)
-        val b = Bubble(null, pee = true)
+        val b = Bubble(pee = true)
         b.iv = ImageView(this).apply {
             setImageResource(R.drawable.ic_water_splash)
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -497,7 +554,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 topMargin = dp(5)
             }
         } else {
-            val iconSize = if (b.isRestart) sizePx / 2 else sizePx - dp(1) * 2
+            // 기본 재시작(배민)은 작은 아이콘, 앱 스티커/앱 재시작은 아이콘이 꽉 차게
+            val iconSize = if (b.isRestart && b.restartPkg == null) sizePx / 2 else sizePx - dp(1) * 2
             b.iv.layoutParams = FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER)
         }
         b.frame.alpha = prefs.buttonAlpha / 100f
@@ -518,6 +576,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     /** 각 버튼의 저장된 위치(없으면 기본 위치). */
     private fun savedPosOf(b: Bubble): Pair<Int, Int> {
         return when {
+            b.restartPkg != null -> {
+                val a = prefs.getRestartApps().firstOrNull { it.packageName == b.restartPkg }
+                if (a == null || a.x < 0 || a.y < 0) autoStickerPos(b) else a.x to a.y
+            }
             b.isRestart ->
                 if (prefs.posX < 0 || prefs.posY < 0) defaultRestartPos() else prefs.posX to prefs.posY
             b.pee ->
@@ -628,6 +690,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun savePositionAt(b: Bubble, x: Int, y: Int) {
         when {
+            b.restartPkg != null -> prefs.updateRestartAppPosition(b.restartPkg, x, y)
             b.isRestart -> {
                 prefs.posX = x
                 prefs.posY = y
@@ -768,7 +831,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     // ---------------- 재시작 ----------------
 
     private fun onRestartTapped(b: Bubble) {
-        val pkg = prefs.targetPackage
+        val pkg = b.restartTarget
         if (pkg == null) {
             toast("먼저 배민리프레시 앱에서 배민커넥트 앱을 선택해 주세요")
             openSettingsScreen()
@@ -781,19 +844,27 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             return
         }
         if (service.isBusy) return
+        val name = appLabel(pkg)
         startSpinner(b)
         service.restart(pkg) { result ->
             stopSpinner(b)
             when (result) {
-                RestartAccessibilityService.Result.RESTARTED -> toast("배민커넥트를 재시작했어요")
-                RestartAccessibilityService.Result.NOT_RUNNING_LAUNCHED -> toast("배민커넥트를 실행했어요")
+                RestartAccessibilityService.Result.RESTARTED -> toast("${name}를 재시작했어요")
+                RestartAccessibilityService.Result.NOT_RUNNING_LAUNCHED -> toast("${name}를 실행했어요")
                 RestartAccessibilityService.Result.TIMEOUT_LAUNCHED ->
                     toast("강제 중지 버튼을 찾지 못해 실행만 했어요")
                 RestartAccessibilityService.Result.FAILED ->
-                    toast("배민커넥트를 실행하지 못했어요. 앱 선택을 확인해 주세요")
+                    toast("${name}를 실행하지 못했어요")
             }
         }
     }
+
+    private fun appLabel(pkg: String): String =
+        try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        } catch (e: Exception) {
+            "앱"
+        }
 
     private fun startSpinner(b: Bubble) {
         b.spinner?.cancel()

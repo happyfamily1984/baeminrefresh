@@ -124,6 +124,42 @@ class Prefs(context: Context) {
         setStickers(getStickers().map { if (it.packageName == pkg) it.copy(x = x, y = y) else it })
     }
 
+    // ---------------- 리프레시(재시작) 앱 ----------------
+
+    fun getRestartApps(): List<Sticker> {
+        val raw = sp.getString(KEY_RESTART_APPS, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                Sticker(o.getString("pkg"), o.optInt("x", -1), o.optInt("y", -1))
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun setRestartApps(list: List<Sticker>) {
+        val arr = JSONArray()
+        for (s in list) {
+            arr.put(JSONObject().put("pkg", s.packageName).put("x", s.x).put("y", s.y))
+        }
+        sp.edit().putString(KEY_RESTART_APPS, arr.toString()).apply()
+    }
+
+    fun addRestartApp(pkg: String) {
+        if (getRestartApps().any { it.packageName == pkg }) return
+        setRestartApps(getRestartApps() + Sticker(pkg))
+    }
+
+    fun removeRestartApp(pkg: String) {
+        setRestartApps(getRestartApps().filterNot { it.packageName == pkg })
+    }
+
+    fun updateRestartAppPosition(pkg: String, x: Int, y: Int) {
+        setRestartApps(getRestartApps().map { if (it.packageName == pkg) it.copy(x = x, y = y) else it })
+    }
+
     fun registerListener(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         sp.registerOnSharedPreferenceChangeListener(l)
 
@@ -139,6 +175,7 @@ class Prefs(context: Context) {
         const val KEY_Y = "pos_y"
         const val KEY_WELCOME = "welcome_shown"
         const val KEY_STICKERS = "app_stickers"
+        const val KEY_RESTART_APPS = "restart_apps"
         const val KEY_LAB_PAUSE_LANDSCAPE = "lab_pause_stickers_landscape"
         const val KEY_PEE_ENABLED = "pee_tracker_enabled"
         const val KEY_PEE_LAST = "pee_last_reset"
