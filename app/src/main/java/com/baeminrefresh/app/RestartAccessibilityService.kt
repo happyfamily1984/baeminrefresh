@@ -61,13 +61,23 @@ class RestartAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
-    /** 현재 포커스된 입력창에 텍스트를 이어서 넣는다. 성공하면 true */
+    /**
+     * 현재 포커스된 입력창의 커서 위치에 텍스트를 넣는다.
+     * 클립보드 붙여넣기(ACTION_PASTE)로 넣어, 플레이스홀더("메시지")에 영향받지 않고 커서 자리에 삽입된다.
+     * 붙여넣기가 안 되는 경우에만 전체 텍스트 설정으로 대체.
+     */
     fun insertText(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
         val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
         if (!node.isEditable) return false
+
+        // 1) 커서 위치에 붙여넣기
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("voice", text))
+        if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) return true
+
+        // 2) 대체: 기존 텍스트 뒤에 붙이기 (플레이스홀더는 제외)
         var existing = node.text?.toString() ?: ""
-        // 비어 있을 때 플레이스홀더("메시지" 등)를 글자처럼 돌려주는 앱 처리: 힌트와 같으면 빈 값으로
         val hint = if (android.os.Build.VERSION.SDK_INT >= 26) node.hintText?.toString() else null
         if (!hint.isNullOrEmpty() && existing == hint) existing = ""
         val merged = if (existing.isEmpty()) text else "$existing $text"
@@ -75,7 +85,6 @@ class RestartAccessibilityService : AccessibilityService() {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, merged)
         }
         val ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        // 커서를 끝으로 이동
         runCatching {
             val sel = android.os.Bundle().apply {
                 putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, merged.length)

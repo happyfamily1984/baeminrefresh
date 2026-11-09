@@ -140,6 +140,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         cancelPeeNotification()
         runCatching { recognizer?.destroy() }
         recognizer = null
+        abandonAudioFocus()
         removeAllBubbles()
         super.onDestroy()
     }
@@ -488,6 +489,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private var recognizer: android.speech.SpeechRecognizer? = null
     private var listening = false
+    private var audioFocusRequest: android.media.AudioFocusRequest? = null
 
     private fun addVoiceBubble() {
         if (bubbles.any { it.voice }) return
@@ -540,6 +542,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             openSettingsScreen()
             return
         }
+        requestAudioFocus() // 음악 등 다른 소리를 잠깐 멈춰 녹음이 되게
         runCatching { recognizer?.destroy() }
         recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(voiceListener)
@@ -554,11 +557,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         try {
             recognizer?.startListening(intent)
             listening = true
-            setVoiceColor(true)
+            // 색은 실제 녹음이 시작되는 onReadyForSpeech 에서 바꾼다
             toast("🎙 말하세요… 끝나면 다시 눌러요")
         } catch (e: Exception) {
             listening = false
-            setVoiceColor(false)
+            abandonAudioFocus()
             toast("음성 인식을 시작하지 못했어요")
         }
     }
@@ -566,7 +569,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun stopVoice() {
         runCatching { recognizer?.stopListening() }
         listening = false
-        setVoiceColor(false)
+        // 색/오디오포커스는 결과/오류 콜백에서 정리된다
     }
 
     private fun setVoiceColor(active: Boolean) {
@@ -574,10 +577,46 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         (b.frame.background as? GradientDrawable)?.setColor(if (active) VOICE_COLOR_ACTIVE else VOICE_COLOR)
     }
 
+    private fun requestAudioFocus() {
+        val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val attrs = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            val req = android.media.AudioFocusRequest.Builder(
+                android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+            ).setAudioAttributes(attrs).build()
+            runCatching { am.requestAudioFocus(req) }
+            audioFocusRequest = req
+        } else {
+            @Suppress("DEPRECATION")
+            runCatching {
+                am.requestAudioFocus(
+                    null,
+                    android.media.AudioManager.STREAM_MUSIC,
+                    android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+                )
+            }
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { runCatching { am.abandonAudioFocusRequest(it) } }
+            audioFocusRequest = null
+        } else {
+            @Suppress("DEPRECATION")
+            runCatching { am.abandonAudioFocus(null) }
+        }
+    }
+
     private val voiceListener = object : android.speech.RecognitionListener {
         override fun onResults(results: android.os.Bundle) {
             listening = false
             setVoiceColor(false)
+            abandonAudioFocus()
             val list = results.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
             val text = list?.firstOrNull()?.trim()
             if (text.isNullOrEmpty()) {
@@ -588,27 +627,41 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             if (!ok) {
                 val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 cm.setPrimaryClip(android.content.ClipData.newPlainText("voice", text))
-                toast("입력창을 못 찾아 클립보드에 복사했어요: $text")
+                toast("입력창을 못 찾아 클립보드에 복사했어요")
             }
         }
 
         override fun onError(error: Int) {
             listening = false
             setVoiceColor(false)
+            abandonAudioFocus()
             val msg = when (error) {
                 android.speech.SpeechRecognizer.ERROR_NO_MATCH -> "말을 인식하지 못했어요"
                 android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "말소리가 없었어요"
                 android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "마이크 권한을 허용해 주세요"
+                android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "잠시 후 다시 눌러 주세요"
+                android.speech.SpeechRecognizer.ERROR_AUDIO -> "마이크를 쓸 수 없어요 (다른 앱이 사용 중일 수 있어요)"
                 else -> "음성 인식 실패 (다시 시도)"
             }
             toast(msg)
         }
 
-        override fun onReadyForSpeech(params: android.os.Bundle?) {}
-        override fun onBeginningOfSpeech() {}
+        override fun onReadyForSpeech(params: android.os.Bundle?) {
+            // 실제 녹음 시작 → 색 변경
+            setVoiceColor(true)
+        }
+
+        override fun onBeginningOfSpeech() {
+            setVoiceColor(true)
+        }
+
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
-        override fun onEndOfSpeech() {}
+        override fun onEndOfSpeech() {
+            // 말 끝 → 처리 단계, 색 원래대로
+            setVoiceColor(false)
+        }
+
         override fun onPartialResults(partialResults: android.os.Bundle?) {}
         override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
     }
