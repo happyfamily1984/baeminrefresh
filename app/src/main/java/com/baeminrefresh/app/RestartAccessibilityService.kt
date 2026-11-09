@@ -61,6 +61,35 @@ class RestartAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
+    /** 접근성으로 화면을 캡쳐한다(권한 팝업 없음, 안드로이드 11+). 실패 시 null */
+    fun captureScreen(onResult: (android.graphics.Bitmap?) -> Unit) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+            onResult(null); return
+        }
+        try {
+            takeScreenshot(
+                android.view.Display.DEFAULT_DISPLAY,
+                mainExecutor,
+                object : TakeScreenshotCallback {
+                    override fun onSuccess(screenshot: ScreenshotResult) {
+                        val buffer = screenshot.hardwareBuffer
+                        val hw = android.graphics.Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
+                        val soft = hw?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                        hw?.recycle()
+                        buffer.close()
+                        onResult(soft)
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        onResult(null)
+                    }
+                }
+            )
+        } catch (e: Exception) {
+            onResult(null)
+        }
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (state == State.WAIT_FORCE_STOP || state == State.WAIT_CONFIRM) step()
     }

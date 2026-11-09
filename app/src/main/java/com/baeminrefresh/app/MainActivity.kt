@@ -72,6 +72,15 @@ class MainActivity : AppCompatActivity() {
             prefs.labPauseStickersLandscape = checked
         }
 
+        val captureSwitch = findViewById<MaterialSwitch>(R.id.capture_switch)
+        captureSwitch.isChecked = prefs.captureButtonEnabled
+        captureSwitch.setOnCheckedChangeListener { _, checked ->
+            prefs.captureButtonEnabled = checked
+            if (checked && !FloatingService.isRunning) {
+                Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 카메라 버튼이 나타나요", Toast.LENGTH_LONG).show()
+            }
+        }
+
         if (Features.PEE) {
             findViewById<View>(R.id.pee_card).visibility = View.VISIBLE
             val peeSwitch = findViewById<MaterialSwitch>(R.id.pee_switch)

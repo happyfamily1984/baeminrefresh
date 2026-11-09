@@ -49,6 +49,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val pee: Boolean = false,
         val restart: Boolean = false,
         val restartPkg: String? = null,
+        val capture: Boolean = false,
     ) {
         lateinit var frame: FrameLayout
         lateinit var iv: ImageView
@@ -162,7 +163,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             Prefs.KEY_LAB_PAUSE_LANDSCAPE ->
                 if (prefs.labPauseStickersLandscape && isLandscape()) removeStickerBubbles()
                 else showStickerBubbles()
-            Prefs.KEY_PEE_ENABLED, Prefs.KEY_WATER_MODE, Prefs.KEY_SHOW_MAIN_RESTART -> buildAll()
+            Prefs.KEY_PEE_ENABLED, Prefs.KEY_WATER_MODE, Prefs.KEY_SHOW_MAIN_RESTART,
+            Prefs.KEY_CAPTURE_ENABLED -> buildAll()
             Prefs.KEY_PEE_LAST -> updatePeeDisplay()
         }
     }
@@ -225,6 +227,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             if (!stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
         }
         if (Features.PEE && prefs.peeTrackerEnabled) addPeeBubble()
+        if (!waterOnly() && prefs.captureButtonEnabled) addCaptureBubble()
         updatePeeState()
     }
 
@@ -364,6 +367,116 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val desired = if (app.x < 0 || app.y < 0) autoStickerPos(b) else (app.x to app.y)
         val (cx, cy) = resolveCollision(b, desired.first, desired.second)
         clampAndApply(b, cx, cy)
+    }
+
+    // ---------------- 화면 캡쳐 버튼 (실험실) ----------------
+
+    private fun addCaptureBubble() {
+        if (bubbles.any { it.capture }) return
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(capture = true)
+        b.iv = ImageView(this).apply {
+            setImageResource(R.drawable.ic_camera)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        b.frame = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xFF4A5560.toInt())
+                setStroke(dp(2), 0xFFFFFFFF.toInt())
+            }
+            elevation = dp(6).toFloat()
+            addView(b.iv, FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER))
+        }
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+
+        val (_, h) = screenSize()
+        val desired = if (prefs.capturePosX < 0 || prefs.capturePosY < 0) dp(12) to (h * 0.45f).roundToInt()
+        else prefs.capturePosX to prefs.capturePosY
+        val (cx, cy) = resolveCollision(b, desired.first, desired.second)
+        clampAndApply(b, cx, cy)
+    }
+
+    /** 화면 캡쳐: 플로팅 버튼을 잠깐 숨기고 접근성으로 캡쳐, 상/하단바를 잘라 저장 */
+    private fun captureScreen() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            toast("화면 캡쳐는 안드로이드 11 이상에서만 돼요")
+            return
+        }
+        val ax = RestartAccessibilityService.instance
+        if (ax == null) {
+            toast("접근성 설정에서 '배민리프레시'를 켜 주세요")
+            openSettingsScreen()
+            return
+        }
+        setBubblesVisible(false)
+        peeHandler.postDelayed({
+            ax.captureScreen { bmp ->
+                setBubblesVisible(true)
+                if (bmp == null) {
+                    toast("화면을 캡쳐하지 못했어요")
+                    return@captureScreen
+                }
+                val cropped = cropSystemBars(bmp)
+                val ok = saveScreenshot(cropped)
+                if (cropped !== bmp) bmp.recycle()
+                toast(if (ok) "화면을 저장했어요 (갤러리 확인)" else "저장하지 못했어요")
+            }
+        }, 160)
+    }
+
+    private fun setBubblesVisible(visible: Boolean) {
+        val v = if (visible) View.VISIBLE else View.INVISIBLE
+        for (b in bubbles) b.frame.visibility = v
+    }
+
+    /** 상단 상태바, 하단 내비게이션바 높이를 잘라낸다 */
+    private fun cropSystemBars(src: android.graphics.Bitmap): android.graphics.Bitmap {
+        val top = systemBarHeight("status_bar_height")
+        val bottom = systemBarHeight("navigation_bar_height")
+        val newH = src.height - top - bottom
+        if (top <= 0 && bottom <= 0) return src
+        if (newH <= 0 || top < 0 || top >= src.height) return src
+        return try {
+            android.graphics.Bitmap.createBitmap(src, 0, top, src.width, newH)
+        } catch (e: Exception) {
+            src
+        }
+    }
+
+    private fun systemBarHeight(resName: String): Int {
+        val id = resources.getIdentifier(resName, "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else 0
+    }
+
+    private fun saveScreenshot(bmp: android.graphics.Bitmap): Boolean {
+        val name = "baeminrefresh_" + System.currentTimeMillis() + ".png"
+        return try {
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(
+                        android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_PICTURES + "/BaeminRefresh"
+                    )
+                }
+            }
+            val resolver = contentResolver
+            val uri = resolver.insert(
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+            ) ?: return false
+            resolver.openOutputStream(uri)?.use { out ->
+                bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+            } ?: return false
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     // ---------------- 워터 타이머 (개인 실험 기능) ----------------
@@ -552,6 +665,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx / 2, sizePx / 2, Gravity.CENTER or Gravity.TOP).apply {
                 topMargin = dp(5)
             }
+        } else if (b.capture) {
+            b.iv.layoutParams = FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER)
         } else {
             // 기본 재시작(배민)은 작은 아이콘, 앱 스티커/앱 재시작은 아이콘이 꽉 차게
             val iconSize = if (b.isRestart && b.restartPkg == null) sizePx / 2 else sizePx - dp(1) * 2
@@ -583,6 +698,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 if (prefs.posX < 0 || prefs.posY < 0) defaultRestartPos() else prefs.posX to prefs.posY
             b.pee ->
                 if (prefs.peePosX < 0 || prefs.peePosY < 0) defaultPeePos() else prefs.peePosX to prefs.peePosY
+            b.capture -> {
+                val (_, h) = screenSize()
+                if (prefs.capturePosX < 0 || prefs.capturePosY < 0) dp(12) to (h * 0.45f).roundToInt()
+                else prefs.capturePosX to prefs.capturePosY
+            }
             else -> {
                 val s = prefs.getStickers().firstOrNull { it.packageName == b.launchPkg }
                 if (s == null || s.x < 0 || s.y < 0) autoStickerPos(b) else s.x to s.y
@@ -704,6 +824,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 prefs.waterModeEnabled = !prefs.waterModeEnabled
                 updatePeeNotification()
             }
+            b.capture -> {
+                prefs.captureButtonEnabled = false
+                toast("화면 캡쳐 버튼을 지웠어요")
+            }
             b.restartPkg != null -> {
                 prefs.removeRestartApp(b.restartPkg)
                 toast("재시작 버튼을 지웠어요")
@@ -729,6 +853,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.pee -> {
                 prefs.peePosX = x
                 prefs.peePosY = y
+            }
+            b.capture -> {
+                prefs.capturePosX = x
+                prefs.capturePosY = y
             }
             else -> b.launchPkg?.let { prefs.updateStickerPosition(it, x, y) }
         }
@@ -840,6 +968,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun onBubbleTapped(b: Bubble) {
         when {
             b.pee -> resetPee()
+            b.capture -> captureScreen()
             b.isRestart -> onRestartTapped(b)
             else -> launchApp(b.launchPkg!!)
         }

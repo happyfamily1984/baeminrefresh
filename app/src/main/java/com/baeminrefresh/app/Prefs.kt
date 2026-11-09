@@ -67,6 +67,19 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_SHOW_MAIN_RESTART, true)
         set(value) = sp.edit().putBoolean(KEY_SHOW_MAIN_RESTART, value).apply()
 
+    /** 실험실: 화면 캡쳐 버튼 */
+    var captureButtonEnabled: Boolean
+        get() = sp.getBoolean(KEY_CAPTURE_ENABLED, false)
+        set(value) = sp.edit().putBoolean(KEY_CAPTURE_ENABLED, value).apply()
+
+    var capturePosX: Int
+        get() = sp.getInt(KEY_CAPTURE_X, -1)
+        set(value) = sp.edit().putInt(KEY_CAPTURE_X, value).apply()
+
+    var capturePosY: Int
+        get() = sp.getInt(KEY_CAPTURE_Y, -1)
+        set(value) = sp.edit().putInt(KEY_CAPTURE_Y, value).apply()
+
     /** 물방울 버튼 위치 (-1이면 기본 위치) */
     var peePosX: Int
         get() = sp.getInt(KEY_PEE_X, -1)
@@ -188,6 +201,9 @@ class Prefs(context: Context) {
         const val KEY_PEE_COUNT_DATE = "pee_count_date"
         const val KEY_WATER_MODE = "water_mode"
         const val KEY_SHOW_MAIN_RESTART = "show_main_restart"
+        const val KEY_CAPTURE_ENABLED = "capture_enabled"
+        const val KEY_CAPTURE_X = "capture_pos_x"
+        const val KEY_CAPTURE_Y = "capture_pos_y"
         const val KEY_PEE_X = "pee_pos_x"
         const val KEY_PEE_Y = "pee_pos_y"
 
