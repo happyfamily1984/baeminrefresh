@@ -413,10 +413,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             openSettingsScreen()
             return
         }
-        setBubblesVisible(false)
+        // 플로팅 버튼을 화면에서 완전히 떼었다가 캡쳐 후 다시 그린다
+        for (b in bubbles) runCatching { wm.removeView(b.frame) }
         peeHandler.postDelayed({
             ax.captureScreen { bmp ->
-                setBubblesVisible(true)
+                buildAll() // 버튼 다시 표시
                 if (bmp == null) {
                     toast("화면을 캡쳐하지 못했어요")
                     return@captureScreen
@@ -426,12 +427,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 if (cropped !== bmp) bmp.recycle()
                 toast(if (ok) "화면을 저장했어요 (갤러리 확인)" else "저장하지 못했어요")
             }
-        }, 160)
-    }
-
-    private fun setBubblesVisible(visible: Boolean) {
-        val v = if (visible) View.VISIBLE else View.INVISIBLE
-        for (b in bubbles) b.frame.visibility = v
+        }, 180)
     }
 
     /** 상단 상태바, 하단 내비게이션바 높이를 잘라낸다 */
