@@ -185,9 +185,31 @@
                         android:backgroundTint="@color/tip_bg"
                         android:lineSpacingExtra="3dp"
                         android:padding="12dp"
-                        android:text="• 버튼을 짧게 누르면 → 배민커넥트 종료 후 재시작\n• 버튼을 누른 채 끌면 → 원하는 위치로 이동 (위치는 저장돼요)\n• 버튼을 길게 누르면 → 이 설정 화면 열기"
+                        android:text="• 짧게 누르면 → 재시작\n• 끌면 → 위치 이동 (저장돼요, 벽·버튼에 맞춰 정렬)\n• 길게 누르고 있으면 → 그 아이콘 삭제 (물방울은 워터 모드 전환)"
                         android:textColor="@color/text_main"
                         android:textSize="13sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="배민커넥트 재시작 버튼 표시"
+                            android:textColor="@color/text_main"
+                            android:textSize="15sp" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/main_restart_switch"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp" />
+                    </LinearLayout>
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/reset_position_button"

@@ -16,7 +16,6 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
-import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
@@ -163,7 +162,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             Prefs.KEY_LAB_PAUSE_LANDSCAPE ->
                 if (prefs.labPauseStickersLandscape && isLandscape()) removeStickerBubbles()
                 else showStickerBubbles()
-            Prefs.KEY_PEE_ENABLED, Prefs.KEY_WATER_MODE -> buildAll()
+            Prefs.KEY_PEE_ENABLED, Prefs.KEY_WATER_MODE, Prefs.KEY_SHOW_MAIN_RESTART -> buildAll()
             Prefs.KEY_PEE_LAST -> updatePeeDisplay()
         }
     }
@@ -221,7 +220,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun buildAll() {
         removeAllBubbles()
         if (!waterOnly()) {
-            addRestartBubble()
+            if (prefs.showMainRestart) addRestartBubble()
             for (a in prefs.getRestartApps()) addRestartAppBubble(a)
             if (!stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
         }
@@ -630,12 +629,17 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private inner class DragTouchListener(private val bubble: Bubble) : View.OnTouchListener {
         private val touchSlop = ViewConfiguration.get(this@FloatingService).scaledTouchSlop
+        private val handler = android.os.Handler(android.os.Looper.getMainLooper())
         private var startX = 0
         private var startY = 0
         private var touchX = 0f
         private var touchY = 0f
-        private var downAt = 0L
         private var dragging = false
+        private var longPressFired = false
+        private val longPressRunnable = Runnable {
+            longPressFired = true
+            onLongPress(bubble)
+        }
 
         override fun onTouch(v: View, e: MotionEvent): Boolean {
             val lp = bubble.lp
@@ -645,46 +649,73 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                     startY = lp.y
                     touchX = e.rawX
                     touchY = e.rawY
-                    downAt = SystemClock.uptimeMillis()
                     dragging = false
+                    longPressFired = false
                     v.animate().scaleX(0.9f).scaleY(0.9f).setDuration(80).start()
+                    // 길게 누르고 있으면 떼지 않아도 바로 적용
+                    handler.postDelayed(longPressRunnable, LONG_PRESS_MS)
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - touchX
                     val dy = e.rawY - touchY
                     if (!dragging && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
                         dragging = true
+                        longPressFired = false
+                        handler.removeCallbacks(longPressRunnable) // 움직이면 길게누르기 취소
                         v.alpha = 1f
                     }
                     if (dragging) clampAndApply(bubble, startX + dx.roundToInt(), startY + dy.roundToInt())
                 }
                 MotionEvent.ACTION_UP -> {
+                    handler.removeCallbacks(longPressRunnable)
                     v.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
-                    if (dragging) {
-                        v.alpha = prefs.buttonAlpha / 100f
-                        val (sx, sy) = computeSnap(bubble)
-                        val (tx, ty) = resolveCollision(bubble, sx, sy)
-                        savePositionAt(bubble, tx, ty)
-                        animateTo(bubble, tx, ty)
-                    } else if (SystemClock.uptimeMillis() - downAt >= LONG_PRESS_MS) {
-                        if (bubble.pee) {
-                            // 물방울 길게 누르기 → 워터 모드 토글 (리스너가 buildAll)
-                            prefs.waterModeEnabled = !prefs.waterModeEnabled
-                            updatePeeNotification()
-                        } else {
-                            openSettingsScreen()
+                    when {
+                        longPressFired -> {
+                            // 길게 누르는 중에 이미 처리됨 (떼는 동작은 무시)
+                            v.alpha = prefs.buttonAlpha / 100f
                         }
-                    } else {
-                        v.performClick()
-                        onBubbleTapped(bubble)
+                        dragging -> {
+                            v.alpha = prefs.buttonAlpha / 100f
+                            val (sx, sy) = computeSnap(bubble)
+                            val (tx, ty) = resolveCollision(bubble, sx, sy)
+                            savePositionAt(bubble, tx, ty)
+                            animateTo(bubble, tx, ty)
+                        }
+                        else -> {
+                            v.performClick()
+                            onBubbleTapped(bubble)
+                        }
                     }
                 }
                 MotionEvent.ACTION_CANCEL -> {
+                    handler.removeCallbacks(longPressRunnable)
                     v.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
                     v.alpha = prefs.buttonAlpha / 100f
                 }
             }
             return true
+        }
+    }
+
+    /** 길게 누르기(떼지 않아도 적용): 워터=모드 토글, 그 외 아이콘=삭제/숨김 */
+    private fun onLongPress(b: Bubble) {
+        when {
+            b.pee -> {
+                prefs.waterModeEnabled = !prefs.waterModeEnabled
+                updatePeeNotification()
+            }
+            b.restartPkg != null -> {
+                prefs.removeRestartApp(b.restartPkg)
+                toast("재시작 버튼을 지웠어요")
+            }
+            b.isSticker -> {
+                prefs.removeSticker(b.launchPkg!!)
+                toast("앱 스티커를 지웠어요")
+            }
+            b.isRestart -> { // 기본 배민커넥트 재시작 버튼 → 숨김(설정에서 다시 켜기)
+                prefs.showMainRestart = false
+                toast("재시작 버튼을 숨겼어요. 설정에서 다시 켤 수 있어요")
+            }
         }
     }
 

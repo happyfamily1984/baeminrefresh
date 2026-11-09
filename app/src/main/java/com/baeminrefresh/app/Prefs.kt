@@ -62,6 +62,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_WATER_MODE, false)
         set(value) = sp.edit().putBoolean(KEY_WATER_MODE, value).apply()
 
+    /** 기본 배민커넥트 재시작 버튼 표시 여부 (길게 눌러 숨길 수 있음) */
+    var showMainRestart: Boolean
+        get() = sp.getBoolean(KEY_SHOW_MAIN_RESTART, true)
+        set(value) = sp.edit().putBoolean(KEY_SHOW_MAIN_RESTART, value).apply()
+
     /** 물방울 버튼 위치 (-1이면 기본 위치) */
     var peePosX: Int
         get() = sp.getInt(KEY_PEE_X, -1)
@@ -182,6 +187,7 @@ class Prefs(context: Context) {
         const val KEY_PEE_COUNT = "pee_count"
         const val KEY_PEE_COUNT_DATE = "pee_count_date"
         const val KEY_WATER_MODE = "water_mode"
+        const val KEY_SHOW_MAIN_RESTART = "show_main_restart"
         const val KEY_PEE_X = "pee_pos_x"
         const val KEY_PEE_Y = "pee_pos_y"
 

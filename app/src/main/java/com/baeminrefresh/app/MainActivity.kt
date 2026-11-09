@@ -432,6 +432,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<MaterialButton>(R.id.test_button).setOnClickListener { testRestart() }
+
+        val mainRestartSwitch = findViewById<MaterialSwitch>(R.id.main_restart_switch)
+        mainRestartSwitch.isChecked = prefs.showMainRestart
+        mainRestartSwitch.setOnCheckedChangeListener { _, checked ->
+            prefs.showMainRestart = checked
+        }
     }
 
     private fun updateFloatingSwitch() {
