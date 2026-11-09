@@ -575,6 +575,29 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun setVoiceColor(active: Boolean) {
         val b = bubbles.firstOrNull { it.voice } ?: return
         (b.frame.background as? GradientDrawable)?.setColor(if (active) VOICE_COLOR_ACTIVE else VOICE_COLOR)
+        if (active) startVoicePulse(b) else stopVoicePulse(b)
+    }
+
+    private fun startVoicePulse(b: Bubble) {
+        b.spinner?.cancel()
+        b.spinner = ObjectAnimator.ofPropertyValuesHolder(
+            b.frame,
+            android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.22f),
+            android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.22f)
+        ).apply {
+            duration = 450
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            start()
+        }
+    }
+
+    private fun stopVoicePulse(b: Bubble) {
+        b.spinner?.cancel()
+        b.spinner = null
+        b.frame.scaleX = 1f
+        b.frame.scaleY = 1f
     }
 
     private fun requestAudioFocus() {
@@ -1266,8 +1289,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val PEE_GOLD_MS = 3L * 60 * 60 * 1000 // 3시간
         private val PEE_COLOR_BLUE = 0xFF2AA7E0.toInt()
         private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
-        private val VOICE_COLOR = 0xFFE0556A.toInt()
-        private val VOICE_COLOR_ACTIVE = 0xFFD32F2F.toInt()
+        private val VOICE_COLOR = 0xFF5C6BC0.toInt() // 평소: 인디고
+        private val VOICE_COLOR_ACTIVE = 0xFFF4323C.toInt() // 녹음 중: 선명한 빨강
 
         @Volatile
         var isRunning = false
