@@ -66,7 +66,10 @@ class RestartAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return false
         val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
         if (!node.isEditable) return false
-        val existing = node.text?.toString() ?: ""
+        var existing = node.text?.toString() ?: ""
+        // 비어 있을 때 플레이스홀더("메시지" 등)를 글자처럼 돌려주는 앱 처리: 힌트와 같으면 빈 값으로
+        val hint = if (android.os.Build.VERSION.SDK_INT >= 26) node.hintText?.toString() else null
+        if (!hint.isNullOrEmpty() && existing == hint) existing = ""
         val merged = if (existing.isEmpty()) text else "$existing $text"
         val args = android.os.Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, merged)
