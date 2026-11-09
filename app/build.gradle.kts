@@ -11,8 +11,8 @@ android {
         applicationId = "com.baeminrefresh.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 39
-        versionName = "1.18.3"
+        versionCode = 40
+        versionName = "1.18.4"
     }
 
     // 릴리스 서명 키는 저장소에 두지 않고, CI가 GitHub Secret에서 꺼내 경로를 넘겨준다.

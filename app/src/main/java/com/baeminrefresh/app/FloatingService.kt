@@ -574,30 +574,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun setVoiceColor(active: Boolean) {
         val b = bubbles.firstOrNull { it.voice } ?: return
+        // 크기 변화 없이 색만 바꾼다 (평소 인디고 → 녹음 중 빨강)
         (b.frame.background as? GradientDrawable)?.setColor(if (active) VOICE_COLOR_ACTIVE else VOICE_COLOR)
-        if (active) startVoicePulse(b) else stopVoicePulse(b)
-    }
-
-    private fun startVoicePulse(b: Bubble) {
-        b.spinner?.cancel()
-        b.spinner = ObjectAnimator.ofPropertyValuesHolder(
-            b.frame,
-            android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.22f),
-            android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.22f)
-        ).apply {
-            duration = 450
-            repeatCount = ValueAnimator.INFINITE
-            repeatMode = ValueAnimator.REVERSE
-            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-            start()
-        }
-    }
-
-    private fun stopVoicePulse(b: Bubble) {
-        b.spinner?.cancel()
-        b.spinner = null
-        b.frame.scaleX = 1f
-        b.frame.scaleY = 1f
     }
 
     private fun requestAudioFocus() {
