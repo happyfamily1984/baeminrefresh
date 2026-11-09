@@ -49,6 +49,13 @@ class MainActivity : AppCompatActivity() {
             refresh()
         }
 
+    private val micPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) {
+                Toast.makeText(this, "마이크 권한이 없으면 음성 입력이 안 돼요", Toast.LENGTH_LONG).show()
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -78,6 +85,22 @@ class MainActivity : AppCompatActivity() {
             prefs.captureButtonEnabled = checked
             if (checked && !FloatingService.isRunning) {
                 Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 카메라 버튼이 나타나요", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        val voiceSwitch = findViewById<MaterialSwitch>(R.id.voice_switch)
+        voiceSwitch.isChecked = prefs.voiceButtonEnabled
+        voiceSwitch.setOnCheckedChangeListener { _, checked ->
+            prefs.voiceButtonEnabled = checked
+            if (checked) {
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                }
+                if (!FloatingService.isRunning) {
+                    Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 마이크 버튼이 나타나요", Toast.LENGTH_LONG).show()
+                }
             }
         }
 

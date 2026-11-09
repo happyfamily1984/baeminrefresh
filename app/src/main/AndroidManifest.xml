@@ -12,12 +12,18 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- 음성 입력 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- 설치된 앱 목록에서 배민커넥트를 찾고 실행하기 위해 필요 -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- 음성 인식 서비스 접근 (안드로이드 11+) -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
 

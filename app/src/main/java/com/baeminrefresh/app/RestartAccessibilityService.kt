@@ -61,6 +61,28 @@ class RestartAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
+    /** 현재 포커스된 입력창에 텍스트를 이어서 넣는다. 성공하면 true */
+    fun insertText(text: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        if (!node.isEditable) return false
+        val existing = node.text?.toString() ?: ""
+        val merged = if (existing.isEmpty()) text else "$existing $text"
+        val args = android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, merged)
+        }
+        val ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        // 커서를 끝으로 이동
+        runCatching {
+            val sel = android.os.Bundle().apply {
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, merged.length)
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, merged.length)
+            }
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)
+        }
+        return ok
+    }
+
     /** 접근성으로 화면을 캡쳐한다(권한 팝업 없음, 안드로이드 11+). 실패 시 null */
     fun captureScreen(onResult: (android.graphics.Bitmap?) -> Unit) {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {

@@ -80,6 +80,19 @@ class Prefs(context: Context) {
         get() = sp.getInt(KEY_CAPTURE_Y, -1)
         set(value) = sp.edit().putInt(KEY_CAPTURE_Y, value).apply()
 
+    /** 실험실: 음성 입력 버튼 */
+    var voiceButtonEnabled: Boolean
+        get() = sp.getBoolean(KEY_VOICE_ENABLED, false)
+        set(value) = sp.edit().putBoolean(KEY_VOICE_ENABLED, value).apply()
+
+    var voicePosX: Int
+        get() = sp.getInt(KEY_VOICE_X, -1)
+        set(value) = sp.edit().putInt(KEY_VOICE_X, value).apply()
+
+    var voicePosY: Int
+        get() = sp.getInt(KEY_VOICE_Y, -1)
+        set(value) = sp.edit().putInt(KEY_VOICE_Y, value).apply()
+
     /** 물방울 버튼 위치 (-1이면 기본 위치) */
     var peePosX: Int
         get() = sp.getInt(KEY_PEE_X, -1)
@@ -204,6 +217,9 @@ class Prefs(context: Context) {
         const val KEY_CAPTURE_ENABLED = "capture_enabled"
         const val KEY_CAPTURE_X = "capture_pos_x"
         const val KEY_CAPTURE_Y = "capture_pos_y"
+        const val KEY_VOICE_ENABLED = "voice_enabled"
+        const val KEY_VOICE_X = "voice_pos_x"
+        const val KEY_VOICE_Y = "voice_pos_y"
         const val KEY_PEE_X = "pee_pos_x"
         const val KEY_PEE_Y = "pee_pos_y"
 

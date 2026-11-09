@@ -50,6 +50,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val restart: Boolean = false,
         val restartPkg: String? = null,
         val capture: Boolean = false,
+        val voice: Boolean = false,
     ) {
         lateinit var frame: FrameLayout
         lateinit var iv: ImageView
@@ -137,6 +138,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         prefs.unregisterListener(this)
         peeHandler.removeCallbacks(peeTick)
         cancelPeeNotification()
+        runCatching { recognizer?.destroy() }
+        recognizer = null
         removeAllBubbles()
         super.onDestroy()
     }
@@ -164,7 +167,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 if (prefs.labPauseStickersLandscape && isLandscape()) removeStickerBubbles()
                 else showStickerBubbles()
             Prefs.KEY_PEE_ENABLED, Prefs.KEY_WATER_MODE, Prefs.KEY_SHOW_MAIN_RESTART,
-            Prefs.KEY_CAPTURE_ENABLED -> buildAll()
+            Prefs.KEY_CAPTURE_ENABLED, Prefs.KEY_VOICE_ENABLED -> buildAll()
             Prefs.KEY_PEE_LAST -> updatePeeDisplay()
         }
     }
@@ -228,6 +231,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
         if (Features.PEE && prefs.peeTrackerEnabled) addPeeBubble()
         if (!waterOnly() && prefs.captureButtonEnabled) addCaptureBubble()
+        if (!waterOnly() && prefs.voiceButtonEnabled) addVoiceBubble()
         updatePeeState()
     }
 
@@ -480,6 +484,135 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
+    // ---------------- 음성 입력 버튼 (실험실) ----------------
+
+    private var recognizer: android.speech.SpeechRecognizer? = null
+    private var listening = false
+
+    private fun addVoiceBubble() {
+        if (bubbles.any { it.voice }) return
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(voice = true)
+        b.iv = ImageView(this).apply {
+            setImageResource(R.drawable.ic_mic)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        b.frame = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (listening) VOICE_COLOR_ACTIVE else VOICE_COLOR)
+                setStroke(dp(2), 0xFFFFFFFF.toInt())
+            }
+            elevation = dp(6).toFloat()
+            addView(b.iv, FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER))
+        }
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+
+        val (w, _) = screenSize()
+        val desired = if (prefs.voicePosX < 0 || prefs.voicePosY < 0) (w - sizePx - dp(12)) to (screenSize().second * 0.45f).roundToInt()
+        else prefs.voicePosX to prefs.voicePosY
+        val (cx, cy) = resolveCollision(b, desired.first, desired.second)
+        clampAndApply(b, cx, cy)
+    }
+
+    private fun onVoiceTapped() {
+        if (!listening) startVoice() else stopVoice()
+    }
+
+    private fun startVoice() {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            toast("마이크 권한이 필요해요. 앱 설정에서 허용해 주세요")
+            openSettingsScreen()
+            return
+        }
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
+            toast("이 기기는 음성 인식을 지원하지 않아요")
+            return
+        }
+        if (RestartAccessibilityService.instance == null) {
+            toast("글자 입력에 접근성이 필요해요. 접근성을 켜 주세요")
+            openSettingsScreen()
+            return
+        }
+        runCatching { recognizer?.destroy() }
+        recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(this).apply {
+            setRecognitionListener(voiceListener)
+        }
+        val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+        }
+        try {
+            recognizer?.startListening(intent)
+            listening = true
+            setVoiceColor(true)
+            toast("🎙 말하세요… 끝나면 다시 눌러요")
+        } catch (e: Exception) {
+            listening = false
+            setVoiceColor(false)
+            toast("음성 인식을 시작하지 못했어요")
+        }
+    }
+
+    private fun stopVoice() {
+        runCatching { recognizer?.stopListening() }
+        listening = false
+        setVoiceColor(false)
+    }
+
+    private fun setVoiceColor(active: Boolean) {
+        val b = bubbles.firstOrNull { it.voice } ?: return
+        (b.frame.background as? GradientDrawable)?.setColor(if (active) VOICE_COLOR_ACTIVE else VOICE_COLOR)
+    }
+
+    private val voiceListener = object : android.speech.RecognitionListener {
+        override fun onResults(results: android.os.Bundle) {
+            listening = false
+            setVoiceColor(false)
+            val list = results.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+            val text = list?.firstOrNull()?.trim()
+            if (text.isNullOrEmpty()) {
+                toast("인식된 말이 없어요")
+                return
+            }
+            val ok = RestartAccessibilityService.instance?.insertText(text) ?: false
+            if (!ok) {
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("voice", text))
+                toast("입력창을 못 찾아 클립보드에 복사했어요: $text")
+            }
+        }
+
+        override fun onError(error: Int) {
+            listening = false
+            setVoiceColor(false)
+            val msg = when (error) {
+                android.speech.SpeechRecognizer.ERROR_NO_MATCH -> "말을 인식하지 못했어요"
+                android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "말소리가 없었어요"
+                android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "마이크 권한을 허용해 주세요"
+                else -> "음성 인식 실패 (다시 시도)"
+            }
+            toast(msg)
+        }
+
+        override fun onReadyForSpeech(params: android.os.Bundle?) {}
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onEndOfSpeech() {}
+        override fun onPartialResults(partialResults: android.os.Bundle?) {}
+        override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+    }
+
     // ---------------- 워터 타이머 (개인 실험 기능) ----------------
 
     private fun addPeeBubble() {
@@ -666,7 +799,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx / 2, sizePx / 2, Gravity.CENTER or Gravity.TOP).apply {
                 topMargin = dp(5)
             }
-        } else if (b.capture) {
+        } else if (b.capture || b.voice) {
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER)
         } else {
             // 기본 재시작(배민)은 작은 아이콘, 앱 스티커/앱 재시작은 아이콘이 꽉 차게
@@ -703,6 +836,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 val (_, h) = screenSize()
                 if (prefs.capturePosX < 0 || prefs.capturePosY < 0) dp(12) to (h * 0.45f).roundToInt()
                 else prefs.capturePosX to prefs.capturePosY
+            }
+            b.voice -> {
+                val (w, h) = screenSize()
+                if (prefs.voicePosX < 0 || prefs.voicePosY < 0) (w - dp(prefs.buttonSizeDp) - dp(12)) to (h * 0.45f).roundToInt()
+                else prefs.voicePosX to prefs.voicePosY
             }
             else -> {
                 val s = prefs.getStickers().firstOrNull { it.packageName == b.launchPkg }
@@ -829,6 +967,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 prefs.captureButtonEnabled = false
                 toast("화면 캡쳐 버튼을 지웠어요")
             }
+            b.voice -> {
+                prefs.voiceButtonEnabled = false
+                toast("음성 입력 버튼을 지웠어요")
+            }
             b.restartPkg != null -> {
                 prefs.removeRestartApp(b.restartPkg)
                 toast("재시작 버튼을 지웠어요")
@@ -858,6 +1000,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.capture -> {
                 prefs.capturePosX = x
                 prefs.capturePosY = y
+            }
+            b.voice -> {
+                prefs.voicePosX = x
+                prefs.voicePosY = y
             }
             else -> b.launchPkg?.let { prefs.updateStickerPosition(it, x, y) }
         }
@@ -970,6 +1116,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         when {
             b.pee -> resetPee()
             b.capture -> captureScreen()
+            b.voice -> onVoiceTapped()
             b.isRestart -> onRestartTapped(b)
             else -> launchApp(b.launchPkg!!)
         }
@@ -1066,6 +1213,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val PEE_GOLD_MS = 3L * 60 * 60 * 1000 // 3시간
         private val PEE_COLOR_BLUE = 0xFF2AA7E0.toInt()
         private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
+        private val VOICE_COLOR = 0xFFE0556A.toInt()
+        private val VOICE_COLOR_ACTIVE = 0xFFD32F2F.toInt()
 
         @Volatile
         var isRunning = false
