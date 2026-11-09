@@ -42,7 +42,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_WELCOME, false)
         set(value) = sp.edit().putBoolean(KEY_WELCOME, value).apply()
 
-    /** 실험실: 가로모드로 바뀌면 앱 스티커를 일시적으로 숨기고, 세로로 돌아오면 다시 표시 */
+    /** 실험실: 가로모드로 바뀌면 플로팅 아이콘을 모두 일시적으로 숨기고, 세로로 돌아오면 다시 표시 */
     var labPauseStickersLandscape: Boolean
         get() = sp.getBoolean(KEY_LAB_PAUSE_LANDSCAPE, false)
         set(value) = sp.edit().putBoolean(KEY_LAB_PAUSE_LANDSCAPE, value).apply()
@@ -62,7 +62,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_WATER_MODE, false)
         set(value) = sp.edit().putBoolean(KEY_WATER_MODE, value).apply()
 
-    /** 기본 배민커넥트 재시작 버튼 표시 여부 (길게 눌러 숨길 수 있음) */
+    /** 기본 배민커넥트 재시작 버튼 표시 여부 (설정에서 켜고 끔) */
     var showMainRestart: Boolean
         get() = sp.getBoolean(KEY_SHOW_MAIN_RESTART, true)
         set(value) = sp.edit().putBoolean(KEY_SHOW_MAIN_RESTART, value).apply()

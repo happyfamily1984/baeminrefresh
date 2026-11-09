@@ -148,9 +148,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         val landscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
-        // 실험실: 가로모드에서는 앱 스티커를 숨기고, 세로로 돌아오면 다시 표시
+        // 실험실: 가로모드에서는 플로팅 아이콘을 모두 숨기고, 세로로 돌아오면 다시 표시
         if (prefs.labPauseStickersLandscape) {
-            if (landscape) removeStickerBubbles() else showStickerBubbles()
+            val shown = bubbles.isNotEmpty()
+            if (landscape == shown) buildAll()
         }
         // 저장된 자리로 되돌린 뒤 서로 겹치지 않게 재배치 (회전 시 겹침 방지)
         repositionAll()
@@ -164,9 +165,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
             Prefs.KEY_STICKERS -> rebuildStickers()
             Prefs.KEY_RESTART_APPS -> buildAll()
-            Prefs.KEY_LAB_PAUSE_LANDSCAPE ->
-                if (prefs.labPauseStickersLandscape && isLandscape()) removeStickerBubbles()
-                else showStickerBubbles()
+            Prefs.KEY_LAB_PAUSE_LANDSCAPE -> buildAll()
             Prefs.KEY_PEE_ENABLED, Prefs.KEY_WATER_MODE, Prefs.KEY_SHOW_MAIN_RESTART,
             Prefs.KEY_CAPTURE_ENABLED, Prefs.KEY_VOICE_ENABLED -> buildAll()
             Prefs.KEY_PEE_LAST -> updatePeeDisplay()
@@ -225,10 +224,14 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun buildAll() {
         removeAllBubbles()
+        if (floatingPaused()) {
+            peeHandler.removeCallbacks(peeTick) // 알림은 그대로 둔다
+            return
+        }
         if (!waterOnly()) {
             if (prefs.showMainRestart) addRestartBubble()
             for (a in prefs.getRestartApps()) addRestartAppBubble(a)
-            if (!stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
+            for (s in prefs.getStickers()) addStickerBubble(s)
         }
         if (Features.PEE && prefs.peeTrackerEnabled) addPeeBubble()
         if (!waterOnly() && prefs.captureButtonEnabled) addCaptureBubble()
@@ -238,11 +241,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun rebuildStickers() {
         removeStickerBubbles()
-        if (!waterOnly() && !stickersPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
+        if (!waterOnly() && !floatingPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
     }
 
-    /** 실험실 설정이 켜져 있고 지금 가로모드면 스티커를 띄우지 않는다. */
-    private fun stickersPaused(): Boolean = prefs.labPauseStickersLandscape && isLandscape()
+    /** 실험실 설정이 켜져 있고 지금 가로모드면 플로팅 아이콘을 하나도 띄우지 않는다. */
+    private fun floatingPaused(): Boolean = prefs.labPauseStickersLandscape && isLandscape()
 
     private fun removeStickerBubbles() {
         val toRemove = bubbles.filter { it.isSticker }
@@ -253,12 +256,6 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         bubbles.removeAll(toRemove)
     }
 
-    /** 스티커가 하나도 없으면 저장된 스티커를 다시 띄운다. */
-    private fun showStickerBubbles() {
-        if (waterOnly()) return
-        if (bubbles.any { it.isSticker }) return
-        for (s in prefs.getStickers()) addStickerBubble(s)
-    }
 
     private fun removeAllBubbles() {
         for (b in bubbles) {
@@ -1010,7 +1007,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
-    /** 길게 누르기(떼지 않아도 적용): 워터=모드 토글, 그 외 아이콘=삭제/숨김 */
+    /** 길게 누르기(떼지 않아도 적용): 워터=모드 토글, 배민리프레시=앱 열기, 그 외 아이콘=삭제 */
     private fun onLongPress(b: Bubble) {
         when {
             b.pee -> {
@@ -1033,10 +1030,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 prefs.removeSticker(b.launchPkg!!)
                 toast("앱 스티커를 지웠어요")
             }
-            b.isRestart -> { // 기본 배민커넥트 재시작 버튼 → 숨김(설정에서 다시 켜기)
-                prefs.showMainRestart = false
-                toast("재시작 버튼을 숨겼어요. 설정에서 다시 켤 수 있어요")
-            }
+            b.isRestart -> openMainApp() // 기본 배민리프레시 버튼 → 배민리프레시 앱 열기
         }
     }
 
@@ -1173,6 +1167,16 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.voice -> onVoiceTapped()
             b.isRestart -> onRestartTapped(b)
             else -> launchApp(b.launchPkg!!)
+        }
+    }
+
+    private fun openMainApp() {
+        val intent = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            toast("배민리프레시를 열지 못했어요")
         }
     }
 

@@ -185,7 +185,7 @@
                         android:backgroundTint="@color/tip_bg"
                         android:lineSpacingExtra="3dp"
                         android:padding="12dp"
-                        android:text="• 짧게 누르면 → 재시작\n• 끌면 → 위치 이동 (저장돼요, 벽·버튼에 맞춰 정렬)\n• 길게 누르고 있으면 → 그 아이콘 삭제 (물방울은 워터 모드 전환)"
+                        android:text="• 짧게 누르면 → 재시작\n• 끌면 → 위치 이동 (저장돼요, 벽·버튼에 맞춰 정렬)\n• 길게 누르고 있으면 → 그 아이콘 삭제 (배민리프레시 버튼은 앱 열기, 물방울은 워터 모드 전환)"
                         android:textColor="@color/text_main"
                         android:textSize="13sp" />
 
@@ -256,7 +256,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:lineSpacingExtra="3dp"
-                        android:text="자주 쓰는 앱을 고르면 그 앱 아이콘 모양의 플로팅 버튼이 생겨요. 누르면 그 앱이 바로 실행돼요. (끌어서 이동, 길게 눌러 설정 열기)"
+                        android:text="자주 쓰는 앱을 고르면 그 앱 아이콘 모양의 플로팅 버튼이 생겨요. 누르면 그 앱이 바로 실행돼요. (끌어서 이동, 길게 눌러 삭제)"
                         android:textColor="@color/text_sub"
                         android:textSize="13sp" />
 
@@ -360,7 +360,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="가로모드 시 앱 스티커 일시정지"
+                            android:text="가로모드 시 플로팅 아이콘 일시정지"
                             android:textColor="@color/text_main"
                             android:textSize="16sp"
                             android:textStyle="bold" />
@@ -370,7 +370,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
                             android:lineSpacingExtra="2dp"
-                            android:text="화면을 가로로 돌리면 앱 스티커가 잠깐 사라지고, 세로로 돌아오면 다시 나타나요. 회전할 때 스티커가 겹치는 걸 막아줘요."
+                            android:text="화면을 가로로 돌리면 플로팅 아이콘이 모두 잠깐 사라지고, 세로로 돌아오면 다시 나타나요."
                             android:textColor="@color/text_sub"
                             android:textSize="13sp" />
                     </LinearLayout>
