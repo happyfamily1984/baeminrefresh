@@ -138,6 +138,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         prefs.unregisterListener(this)
         peeHandler.removeCallbacks(peeTick)
         cancelPeeNotification()
+        voiceWanted = false
         runCatching { recognizer?.destroy() }
         recognizer = null
         abandonAudioFocus()
@@ -486,6 +487,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private var recognizer: android.speech.SpeechRecognizer? = null
     private var listening = false
+    /** 사용자가 다시 누를 때까지 녹음을 이어가는 중인지 (인식기가 말 끊김으로 멈춰도 자동 재시작) */
+    private var voiceWanted = false
+    private var voiceInsertedAny = false
+    private var voiceEmptyStreak = 0
     private var audioFocusRequest: android.media.AudioFocusRequest? = null
 
     private fun addVoiceBubble() {
@@ -499,7 +504,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         b.frame = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(if (listening) VOICE_COLOR_ACTIVE else VOICE_COLOR)
+                setColor(if (voiceWanted) VOICE_COLOR_ACTIVE else VOICE_COLOR)
                 setStroke(dp(2), 0xFFFFFFFF.toInt())
             }
             elevation = dp(6).toFloat()
@@ -519,7 +524,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     private fun onVoiceTapped() {
-        if (!listening) startVoice() else stopVoice()
+        if (!voiceWanted) startVoice() else stopVoice()
     }
 
     private fun startVoice() {
@@ -544,29 +549,69 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(voiceListener)
         }
+        voiceWanted = true
+        voiceInsertedAny = false
+        voiceEmptyStreak = 0
+        if (listenOnce()) {
+            toast("🎙 말하세요… 끝나면 다시 눌러요")
+        } else {
+            endVoiceSession()
+            toast("음성 인식을 시작하지 못했어요")
+        }
+    }
+
+    /** 인식 한 구간 시작. 말이 잠깐 끊기면 인식기가 스스로 멈추므로 voiceWanted 동안 계속 다시 부른다. */
+    private fun listenOnce(): Boolean {
         val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(
                 android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
             )
             putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+            // 말 사이 쉬는 시간을 넉넉히 (지원하는 인식기에서만 적용됨)
+            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 5000L)
+            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 5000L)
+            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 10000L)
         }
-        try {
+        return try {
             recognizer?.startListening(intent)
             listening = true
-            // 색은 실제 녹음이 시작되는 onReadyForSpeech 에서 바꾼다
-            toast("🎙 말하세요… 끝나면 다시 눌러요")
+            setVoiceColor(true) // 녹음 세션 동안 계속 빨강
+            true
         } catch (e: Exception) {
-            listening = false
-            abandonAudioFocus()
-            toast("음성 인식을 시작하지 못했어요")
+            false
         }
     }
 
+    /** 결과/오류 뒤: 사용자가 아직 안 멈췄으면 바로 다시 듣는다. */
+    private fun continueOrEnd() {
+        if (voiceWanted && voiceEmptyStreak < VOICE_MAX_EMPTY) {
+            peeHandler.postDelayed({
+                if (voiceWanted && !listenOnce()) endVoiceSession()
+            }, 150L)
+        } else {
+            if (voiceWanted && voiceEmptyStreak >= VOICE_MAX_EMPTY) toast("말소리가 없어 녹음을 멈췄어요")
+            endVoiceSession()
+        }
+    }
+
+    private fun endVoiceSession() {
+        voiceWanted = false
+        listening = false
+        setVoiceColor(false)
+        abandonAudioFocus()
+    }
+
     private fun stopVoice() {
+        // 사용자가 다시 누름 → 지금 구간 결과까지만 받고 끝낸다
+        voiceWanted = false
+        setVoiceColor(false)
+        if (!listening) { // 구간 사이(재시작 대기 중)라면 콜백이 안 오므로 바로 정리
+            endVoiceSession()
+            return
+        }
         runCatching { recognizer?.stopListening() }
         listening = false
-        // 색/오디오포커스는 결과/오류 콜백에서 정리된다
     }
 
     private fun setVoiceColor(active: Boolean) {
@@ -613,26 +658,47 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private val voiceListener = object : android.speech.RecognitionListener {
         override fun onResults(results: android.os.Bundle) {
             listening = false
-            setVoiceColor(false)
-            abandonAudioFocus()
             val list = results.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
             val text = list?.firstOrNull()?.trim()
             if (text.isNullOrEmpty()) {
-                toast("인식된 말이 없어요")
+                voiceEmptyStreak++
+                if (!voiceWanted && !voiceInsertedAny) toast("인식된 말이 없어요")
+                continueOrEnd()
                 return
             }
-            val ok = RestartAccessibilityService.instance?.insertText(text) ?: false
-            if (!ok) {
+            voiceEmptyStreak = 0
+            val piece = if (voiceInsertedAny) " $text" else text
+            val ok = RestartAccessibilityService.instance?.insertText(piece) ?: false
+            if (ok) {
+                voiceInsertedAny = true
+                continueOrEnd()
+            } else {
                 val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 cm.setPrimaryClip(android.content.ClipData.newPlainText("voice", text))
                 toast("입력창을 못 찾아 클립보드에 복사했어요")
+                endVoiceSession()
             }
         }
 
         override fun onError(error: Int) {
             listening = false
-            setVoiceColor(false)
-            abandonAudioFocus()
+            // 말 사이가 끊겨서 멈춘 것 → 사용자가 안 멈췄으면 조용히 다시 듣기
+            if (voiceWanted && (error == android.speech.SpeechRecognizer.ERROR_NO_MATCH ||
+                    error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
+                    error == android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+                    error == android.speech.SpeechRecognizer.ERROR_CLIENT)
+            ) {
+                voiceEmptyStreak++
+                continueOrEnd()
+                return
+            }
+            if (!voiceWanted && (error == android.speech.SpeechRecognizer.ERROR_NO_MATCH ||
+                    error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT) && voiceInsertedAny
+            ) {
+                endVoiceSession() // 이미 입력했고 사용자가 멈춘 것 → 조용히 끝
+                return
+            }
+            endVoiceSession()
             val msg = when (error) {
                 android.speech.SpeechRecognizer.ERROR_NO_MATCH -> "말을 인식하지 못했어요"
                 android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "말소리가 없었어요"
@@ -645,19 +711,17 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
 
         override fun onReadyForSpeech(params: android.os.Bundle?) {
-            // 실제 녹음 시작 → 색 변경
-            setVoiceColor(true)
+            if (voiceWanted) setVoiceColor(true)
         }
 
         override fun onBeginningOfSpeech() {
-            setVoiceColor(true)
+            if (voiceWanted) setVoiceColor(true)
         }
 
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {
-            // 말 끝 → 처리 단계, 색 원래대로
-            setVoiceColor(false)
+            // 구간이 끝나도 사용자가 멈추기 전까지는 빨강 유지 (곧 다시 듣는다)
         }
 
         override fun onPartialResults(partialResults: android.os.Bundle?) {}
@@ -1272,6 +1336,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private val PEE_COLOR_BLUE = 0xFF2AA7E0.toInt()
         private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
         private val VOICE_COLOR = 0xFF5C6BC0.toInt() // 평소: 인디고
+        private const val VOICE_MAX_EMPTY = 8 // 말 없는 구간이 이만큼 연속이면(약 1분) 자동 종료
         private val VOICE_COLOR_ACTIVE = 0xFFF4323C.toInt() // 녹음 중: 선명한 빨강
 
         @Volatile
