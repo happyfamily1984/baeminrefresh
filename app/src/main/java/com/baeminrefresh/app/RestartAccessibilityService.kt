@@ -67,9 +67,13 @@ class RestartAccessibilityService : AccessibilityService() {
      * 붙여넣기가 안 되는 경우에만 전체 텍스트 설정으로 대체.
      */
     fun insertText(text: String): Boolean {
-        val root = rootInActiveWindow ?: return false
-        val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
-        if (!node.isEditable) return false
+        val node = findInputNode() ?: return false
+        // 포커스가 없는 입력창이면 먼저 눌러서 포커스를 준다
+        if (!node.isFocused) {
+            if (!node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) {
+                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
+        }
 
         // 1) 커서 위치에 붙여넣기
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -93,6 +97,80 @@ class RestartAccessibilityService : AccessibilityService() {
             node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)
         }
         return ok
+    }
+
+    /**
+     * 글자를 넣을 입력창을 찾는다.
+     * 활성 창만 보면 키보드·오버레이 창이 잡혀 실패할 때가 있어서 화면의 모든 앱 창을 뒤진다.
+     * 1) 입력 포커스가 있는 편집 가능한 칸  2) 포커스된 칸 안쪽의 편집 칸  3) 화면에 보이는 편집 칸(아래쪽 우선)
+     */
+    private fun findInputNode(): AccessibilityNodeInfo? {
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        rootInActiveWindow?.let { roots.add(it) }
+        runCatching {
+            for (w in windows) {
+                if (w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD) continue
+                if (w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
+                val r = w.root ?: continue
+                if (r.packageName == packageName) continue
+                roots.add(r)
+            }
+        }
+        val appRoots = roots.filter { it.packageName != packageName }
+
+        // 1) 입력 포커스
+        for (r in appRoots) {
+            val f = runCatching { r.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }.getOrNull() ?: continue
+            if (isTextInput(f)) return f
+            findEditable(f, onlyFocused = false)?.let { return it }
+        }
+        // 2) 포커스 표시가 된 편집 칸
+        for (r in appRoots) findEditable(r, onlyFocused = true)?.let { return it }
+        // 3) 보이는 편집 칸 중 가장 아래쪽(채팅 입력창 등)
+        var best: AccessibilityNodeInfo? = null
+        var bestBottom = -1
+        for (r in appRoots) {
+            for (n in collectEditables(r)) {
+                val rect = android.graphics.Rect()
+                n.getBoundsInScreen(rect)
+                if (rect.isEmpty) continue
+                if (rect.bottom > bestBottom) {
+                    bestBottom = rect.bottom
+                    best = n
+                }
+            }
+        }
+        return best
+    }
+
+    private fun isTextInput(n: AccessibilityNodeInfo): Boolean =
+        n.isEditable || (n.className?.toString()?.contains("EditText") == true)
+
+    private fun findEditable(root: AccessibilityNodeInfo, onlyFocused: Boolean): AccessibilityNodeInfo? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var count = 0
+        while (queue.isNotEmpty() && count < 3000) {
+            val n = queue.removeFirst()
+            count++
+            if (isTextInput(n) && n.isVisibleToUser && (!onlyFocused || n.isFocused)) return n
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
+        return null
+    }
+
+    private fun collectEditables(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+        val out = mutableListOf<AccessibilityNodeInfo>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var count = 0
+        while (queue.isNotEmpty() && count < 3000) {
+            val n = queue.removeFirst()
+            count++
+            if (isTextInput(n) && n.isVisibleToUser) out.add(n)
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
+        return out
     }
 
     /** 접근성으로 화면을 캡쳐한다(권한 팝업 없음, 안드로이드 11+). 실패 시 null */
