@@ -491,6 +491,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private var voiceWanted = false
     private var voiceInsertedAny = false
     private var voiceEmptyStreak = 0
+    private var voiceFailStreak = 0
     private var audioFocusRequest: android.media.AudioFocusRequest? = null
 
     private fun addVoiceBubble() {
@@ -544,20 +545,53 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             openSettingsScreen()
             return
         }
-        requestAudioFocus() // 음악 등 다른 소리를 잠깐 멈춰 녹음이 되게
+        voiceWanted = true
+        voiceInsertedAny = false
+        voiceEmptyStreak = 0
+        voiceFailStreak = 0
+        setVoiceColor(true)
+        requestAudioFocus() // 유튜브/음악을 잠깐 멈춰 녹음이 되게
+        recreateRecognizer()
+        toast("🎙 말하세요… 끝나면 다시 눌러요")
+        // 재생 중이던 소리가 실제로 멈출 때까지 잠깐 기다렸다가 듣기 시작 (첫 시도 실패 방지)
+        waitForSilenceThen(System.currentTimeMillis()) {
+            if (voiceWanted && !listenOnce()) retryAfterFailure()
+        }
+    }
+
+    private fun recreateRecognizer() {
         runCatching { recognizer?.destroy() }
         recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(voiceListener)
         }
-        voiceWanted = true
-        voiceInsertedAny = false
-        voiceEmptyStreak = 0
-        if (listenOnce()) {
-            toast("🎙 말하세요… 끝나면 다시 눌러요")
+    }
+
+    /** 다른 앱 소리가 멈출 때까지(최대 1.5초) 기다린 뒤 조금 더 쉬고 실행 */
+    private fun waitForSilenceThen(startedAt: Long, action: () -> Unit) {
+        val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val elapsed = System.currentTimeMillis() - startedAt
+        if (am.isMusicActive && elapsed < 1500L) {
+            peeHandler.postDelayed({ if (voiceWanted) waitForSilenceThen(startedAt, action) }, 100L)
         } else {
-            endVoiceSession()
-            toast("음성 인식을 시작하지 못했어요")
+            peeHandler.postDelayed({ if (voiceWanted) action() }, 250L)
         }
+    }
+
+    /** 마이크/인식기 오류 → 인식기를 새로 만들어 몇 번 더 시도 */
+    private fun retryAfterFailure(): Boolean {
+        if (!voiceWanted || voiceFailStreak >= VOICE_MAX_FAIL) return false
+        voiceFailStreak++
+        recreateRecognizer()
+        requestAudioFocus()
+        peeHandler.postDelayed({
+            if (voiceWanted) waitForSilenceThen(System.currentTimeMillis()) {
+                if (voiceWanted && !listenOnce() && !retryAfterFailure()) {
+                    endVoiceSession()
+                    toast("음성 인식을 시작하지 못했어요")
+                }
+            }
+        }, 300L * voiceFailStreak)
+        return true
     }
 
     /** 인식 한 구간 시작. 말이 잠깐 끊기면 인식기가 스스로 멈추므로 voiceWanted 동안 계속 다시 부른다. */
@@ -623,13 +657,17 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun requestAudioFocus() {
         val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { runCatching { am.abandonAudioFocusRequest(it) } }
+            // 음성 비서 용도 + 독점 포커스 → 유튜브/유튜브 뮤직이 소리를 줄이는 대신 확실히 일시정지
             val attrs = android.media.AudioAttributes.Builder()
-                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
             val req = android.media.AudioFocusRequest.Builder(
-                android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
-            ).setAudioAttributes(attrs).build()
+                android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
+            ).setAudioAttributes(attrs).setWillPauseWhenDucked(true)
+                .setOnAudioFocusChangeListener { }
+                .build()
             runCatching { am.requestAudioFocus(req) }
             audioFocusRequest = req
         } else {
@@ -638,7 +676,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 am.requestAudioFocus(
                     null,
                     android.media.AudioManager.STREAM_MUSIC,
-                    android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+                    android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
                 )
             }
         }
@@ -667,6 +705,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 return
             }
             voiceEmptyStreak = 0
+            voiceFailStreak = 0
             val piece = if (voiceInsertedAny) " $text" else text
             val ok = RestartAccessibilityService.instance?.insertText(piece) ?: false
             if (ok) {
@@ -692,6 +731,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 continueOrEnd()
                 return
             }
+            // 마이크가 아직 다른 앱에 잡혀 있거나 인식 서버가 순간 실패 → 새로 만들어 재시도
+            if (voiceWanted && error != android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS &&
+                retryAfterFailure()
+            ) return
             if (!voiceWanted && (error == android.speech.SpeechRecognizer.ERROR_NO_MATCH ||
                     error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT) && voiceInsertedAny
             ) {
@@ -712,6 +755,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
         override fun onReadyForSpeech(params: android.os.Bundle?) {
             if (voiceWanted) setVoiceColor(true)
+            voiceFailStreak = 0
         }
 
         override fun onBeginningOfSpeech() {
@@ -1336,6 +1380,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private val PEE_COLOR_BLUE = 0xFF2AA7E0.toInt()
         private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
         private val VOICE_COLOR = 0xFF5C6BC0.toInt() // 평소: 인디고
+        private const val VOICE_MAX_FAIL = 4 // 오류 시 자동 재시도 횟수
         private const val VOICE_MAX_EMPTY = 8 // 말 없는 구간이 이만큼 연속이면(약 1분) 자동 종료
         private val VOICE_COLOR_ACTIVE = 0xFFF4323C.toInt() // 녹음 중: 선명한 빨강
 
