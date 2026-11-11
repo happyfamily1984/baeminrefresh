@@ -139,6 +139,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         peeHandler.removeCallbacks(peeTick)
         cancelPeeNotification()
         voiceWanted = false
+        unmuteBeep()
         runCatching { recognizer?.destroy() }
         recognizer = null
         abandonAudioFocus()
@@ -512,6 +513,32 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
     private val voiceFlushFallback = Runnable { if (!voiceWanted) flushVoice() }
+    /** 인식기가 다시 시작할 때마다 나는 '띵/뚝' 소리를 막으려고 잠깐 음소거한 소리 종류 */
+    private val mutedStreams = mutableSetOf<Int>()
+    private val unmuteRunnable = Runnable { unmuteBeep() }
+
+    private fun muteBeep() {
+        peeHandler.removeCallbacks(unmuteRunnable)
+        val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        for (st in BEEP_STREAMS) {
+            if (st in mutedStreams) continue
+            runCatching {
+                if (!am.isStreamMute(st)) {
+                    am.adjustStreamVolume(st, android.media.AudioManager.ADJUST_MUTE, 0)
+                    mutedStreams.add(st)
+                }
+            }
+        }
+    }
+
+    private fun unmuteBeep() {
+        peeHandler.removeCallbacks(unmuteRunnable)
+        val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        for (st in mutedStreams) {
+            runCatching { am.adjustStreamVolume(st, android.media.AudioManager.ADJUST_UNMUTE, 0) }
+        }
+        mutedStreams.clear()
+    }
     private var audioFocusRequest: android.media.AudioFocusRequest? = null
 
     private fun addVoiceBubble() {
@@ -576,6 +603,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         peeHandler.postDelayed(voiceWatchdog, 5000L)
         setVoiceColor(true)
         requestAudioFocus() // 유튜브/음악을 잠깐 멈춰 녹음이 되게
+        muteBeep() // 구간마다 나는 시작/종료 효과음 끄기
         recreateRecognizer()
         toast("🎙 말하세요… 다 말하면 다시 눌러요 (그때 한 번에 입력돼요)")
         // 재생 중이던 소리가 실제로 멈출 때까지 잠깐 기다렸다가 듣기 시작 (첫 시도 실패 방지)
@@ -699,6 +727,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun endVoiceSession() {
         peeHandler.removeCallbacks(voiceWatchdog)
+        // 마지막 종료음까지 묻히도록 조금 뒤에 소리 복구
+        if (mutedStreams.isNotEmpty()) {
+            peeHandler.removeCallbacks(unmuteRunnable)
+            peeHandler.postDelayed(unmuteRunnable, 800L)
+        }
         voiceSession = false
         voiceWanted = false
         listening = false
@@ -1459,6 +1492,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
         private val VOICE_COLOR = 0xFF5C6BC0.toInt() // 평소: 인디고
         private const val VOICE_MAX_FAIL = 4 // 오류 시 자동 재시도 횟수
+        private val BEEP_STREAMS = intArrayOf(
+            android.media.AudioManager.STREAM_MUSIC,
+            android.media.AudioManager.STREAM_SYSTEM
+        )
         private const val VOICE_IDLE_STOP_MS = 90_000L // 이만큼 말이 없으면 자동 종료
         private const val VOICE_MAX_EMPTY = 8 // 말 없는 구간이 이만큼 연속이면(약 1분) 자동 종료
         private val VOICE_COLOR_ACTIVE = 0xFFF4323C.toInt() // 녹음 중: 선명한 빨강
