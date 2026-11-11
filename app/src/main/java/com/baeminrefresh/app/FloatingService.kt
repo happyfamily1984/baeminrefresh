@@ -489,9 +489,29 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private var listening = false
     /** 사용자가 다시 누를 때까지 녹음을 이어가는 중인지 (인식기가 말 끊김으로 멈춰도 자동 재시작) */
     private var voiceWanted = false
-    private var voiceInsertedAny = false
+    /** 녹음 세션이 진행 중(입력 전)인지. 끝난 뒤 늦게 오는 콜백은 무시한다. */
+    private var voiceSession = false
     private var voiceEmptyStreak = 0
     private var voiceFailStreak = 0
+    /** 녹음한 말을 모아 두었다가, 다시 누르면 한 번에 입력한다 (중간중간 끊겨 들어가는 것 방지) */
+    private val voiceBuffer = mutableListOf<String>()
+    /** 안드로이드 13+ 연속 인식(구간 나눔 없이 길게 듣기) 지원 여부: null=아직 모름 */
+    private var segmentedOk: Boolean? = null
+    private var usingSegmented = false
+    private var voiceSessionReady = false
+    private var lastVoiceActivity = 0L
+    private val voiceWatchdog = object : Runnable {
+        override fun run() {
+            if (!voiceWanted) return
+            if (System.currentTimeMillis() - lastVoiceActivity > VOICE_IDLE_STOP_MS) {
+                toast("말소리가 없어 녹음을 멈췄어요")
+                stopVoice()
+                return
+            }
+            peeHandler.postDelayed(this, 5000L)
+        }
+    }
+    private val voiceFlushFallback = Runnable { if (!voiceWanted) flushVoice() }
     private var audioFocusRequest: android.media.AudioFocusRequest? = null
 
     private fun addVoiceBubble() {
@@ -546,13 +566,18 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             return
         }
         voiceWanted = true
-        voiceInsertedAny = false
+        voiceSession = true
         voiceEmptyStreak = 0
         voiceFailStreak = 0
+        voiceBuffer.clear()
+        peeHandler.removeCallbacks(voiceFlushFallback)
+        lastVoiceActivity = System.currentTimeMillis()
+        peeHandler.removeCallbacks(voiceWatchdog)
+        peeHandler.postDelayed(voiceWatchdog, 5000L)
         setVoiceColor(true)
         requestAudioFocus() // 유튜브/음악을 잠깐 멈춰 녹음이 되게
         recreateRecognizer()
-        toast("🎙 말하세요… 끝나면 다시 눌러요")
+        toast("🎙 말하세요… 다 말하면 다시 눌러요 (그때 한 번에 입력돼요)")
         // 재생 중이던 소리가 실제로 멈출 때까지 잠깐 기다렸다가 듣기 시작 (첫 시도 실패 방지)
         waitForSilenceThen(System.currentTimeMillis()) {
             if (voiceWanted && !listenOnce()) retryAfterFailure()
@@ -586,8 +611,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         peeHandler.postDelayed({
             if (voiceWanted) waitForSilenceThen(System.currentTimeMillis()) {
                 if (voiceWanted && !listenOnce() && !retryAfterFailure()) {
-                    endVoiceSession()
-                    toast("음성 인식을 시작하지 못했어요")
+                    if (voiceBuffer.isEmpty()) {
+                        endVoiceSession()
+                        toast("음성 인식을 시작하지 못했어요")
+                    } else flushVoice()
                 }
             }
         }, 300L * voiceFailStreak)
@@ -606,7 +633,17 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 5000L)
             putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 5000L)
             putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 10000L)
+            usingSegmented = Build.VERSION.SDK_INT >= 33 && segmentedOk != false
+            if (usingSegmented) {
+                // 안드로이드 13+: 말이 멈춰도 세션을 끊지 않고 구간 결과만 계속 보내 주는 연속 인식
+                putExtra(
+                    android.speech.RecognizerIntent.EXTRA_SEGMENTED_SESSION,
+                    android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS
+                )
+                putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 10L * 60 * 1000)
+            }
         }
+        voiceSessionReady = false
         return try {
             recognizer?.startListening(intent)
             listening = true
@@ -625,11 +662,44 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }, 150L)
         } else {
             if (voiceWanted && voiceEmptyStreak >= VOICE_MAX_EMPTY) toast("말소리가 없어 녹음을 멈췄어요")
-            endVoiceSession()
+            flushVoice()
+        }
+    }
+
+    /** 모아 둔 말을 한 번에 입력하고 녹음을 끝낸다. */
+    private fun flushVoice() {
+        peeHandler.removeCallbacks(voiceFlushFallback)
+        if (!voiceSession) return // 이미 입력하고 끝난 세션
+        voiceSession = false
+        val text = voiceBuffer.joinToString(" ").trim()
+        voiceBuffer.clear()
+        endVoiceSession()
+        if (text.isEmpty()) {
+            toast("인식된 말이 없어요")
+            return
+        }
+        val ok = RestartAccessibilityService.instance?.insertText(text) ?: false
+        if (!ok) {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("voice", text))
+            toast("입력창을 못 찾아 클립보드에 복사했어요")
+        }
+    }
+
+    private fun addVoiceText(bundle: android.os.Bundle?) {
+        val t = bundle?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+            ?.firstOrNull()?.trim()
+        if (!t.isNullOrEmpty()) {
+            voiceBuffer.add(t)
+            voiceEmptyStreak = 0
+            voiceFailStreak = 0
+            lastVoiceActivity = System.currentTimeMillis()
         }
     }
 
     private fun endVoiceSession() {
+        peeHandler.removeCallbacks(voiceWatchdog)
+        voiceSession = false
         voiceWanted = false
         listening = false
         setVoiceColor(false)
@@ -640,12 +710,14 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         // 사용자가 다시 누름 → 지금 구간 결과까지만 받고 끝낸다
         voiceWanted = false
         setVoiceColor(false)
-        if (!listening) { // 구간 사이(재시작 대기 중)라면 콜백이 안 오므로 바로 정리
-            endVoiceSession()
+        if (!listening) { // 구간 사이(재시작 대기 중)라면 콜백이 안 오므로 바로 입력
+            flushVoice()
             return
         }
         runCatching { recognizer?.stopListening() }
         listening = false
+        // 마지막 구간 결과가 안 오는 경우 대비: 잠시 뒤 모아 둔 것만이라도 입력
+        peeHandler.postDelayed(voiceFlushFallback, 3000L)
     }
 
     private fun setVoiceColor(active: Boolean) {
@@ -696,31 +768,37 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private val voiceListener = object : android.speech.RecognitionListener {
         override fun onResults(results: android.os.Bundle) {
             listening = false
-            val list = results.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
-            val text = list?.firstOrNull()?.trim()
-            if (text.isNullOrEmpty()) {
-                voiceEmptyStreak++
-                if (!voiceWanted && !voiceInsertedAny) toast("인식된 말이 없어요")
-                continueOrEnd()
-                return
-            }
-            voiceEmptyStreak = 0
-            voiceFailStreak = 0
-            val piece = if (voiceInsertedAny) " $text" else text
-            val ok = RestartAccessibilityService.instance?.insertText(piece) ?: false
-            if (ok) {
-                voiceInsertedAny = true
-                continueOrEnd()
-            } else {
-                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("voice", text))
-                toast("입력창을 못 찾아 클립보드에 복사했어요")
-                endVoiceSession()
-            }
+            val before = voiceBuffer.size
+            addVoiceText(results)
+            if (voiceBuffer.size == before) voiceEmptyStreak++
+            if (voiceWanted) continueOrEnd() else flushVoice()
+        }
+
+        // 안드로이드 13+ 연속 인식: 구간마다 결과가 오지만 세션은 계속된다
+        override fun onSegmentResults(segmentResults: android.os.Bundle) {
+            addVoiceText(segmentResults)
+        }
+
+        override fun onEndOfSegmentedSession() {
+            listening = false
+            segmentedOk = true
+            if (voiceWanted) continueOrEnd() else flushVoice()
         }
 
         override fun onError(error: Int) {
             listening = false
+            // 연속 인식을 이 기기 인식기가 지원하지 않음 → 기존 방식으로 바로 다시
+            if (usingSegmented && !voiceSessionReady && segmentedOk == null && voiceWanted) {
+                segmentedOk = false
+                recreateRecognizer()
+                peeHandler.postDelayed({ if (voiceWanted && !listenOnce()) retryAfterFailure() }, 200L)
+                return
+            }
+            // 사용자가 멈춘 뒤 오는 오류 → 모아 둔 것 입력하고 끝
+            if (!voiceWanted) {
+                flushVoice()
+                return
+            }
             // 말 사이가 끊겨서 멈춘 것 → 사용자가 안 멈췄으면 조용히 다시 듣기
             if (voiceWanted && (error == android.speech.SpeechRecognizer.ERROR_NO_MATCH ||
                     error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
@@ -735,10 +813,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             if (voiceWanted && error != android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS &&
                 retryAfterFailure()
             ) return
-            if (!voiceWanted && (error == android.speech.SpeechRecognizer.ERROR_NO_MATCH ||
-                    error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT) && voiceInsertedAny
-            ) {
-                endVoiceSession() // 이미 입력했고 사용자가 멈춘 것 → 조용히 끝
+            if (voiceBuffer.isNotEmpty()) {
+                flushVoice() // 들은 데까지는 입력
                 return
             }
             endVoiceSession()
@@ -756,9 +832,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         override fun onReadyForSpeech(params: android.os.Bundle?) {
             if (voiceWanted) setVoiceColor(true)
             voiceFailStreak = 0
+            voiceSessionReady = true
         }
 
         override fun onBeginningOfSpeech() {
+            lastVoiceActivity = System.currentTimeMillis()
             if (voiceWanted) setVoiceColor(true)
         }
 
@@ -1381,6 +1459,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
         private val VOICE_COLOR = 0xFF5C6BC0.toInt() // 평소: 인디고
         private const val VOICE_MAX_FAIL = 4 // 오류 시 자동 재시도 횟수
+        private const val VOICE_IDLE_STOP_MS = 90_000L // 이만큼 말이 없으면 자동 종료
         private const val VOICE_MAX_EMPTY = 8 // 말 없는 구간이 이만큼 연속이면(약 1분) 자동 종료
         private val VOICE_COLOR_ACTIVE = 0xFFF4323C.toInt() // 녹음 중: 선명한 빨강
 
