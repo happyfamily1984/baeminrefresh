@@ -63,6 +63,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     private val bubbles = mutableListOf<Bubble>()
+    private val rebuildForSize = Runnable { if (isRunning) buildAll() }
     private val peeHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val peeTick = object : Runnable {
         override fun run() {
@@ -161,7 +162,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
         when (key) {
-            Prefs.KEY_SIZE, Prefs.KEY_ALPHA -> bubbles.forEach { applyAppearance(it) }
+            Prefs.KEY_SIZE -> { // 뱃지·글자까지 크기에 맞춰 다시 그린다 (슬라이더 끄는 동안은 모아서 한 번)
+                peeHandler.removeCallbacks(rebuildForSize)
+                peeHandler.postDelayed(rebuildForSize, 250L)
+            }
+            Prefs.KEY_ALPHA -> bubbles.forEach { applyAppearance(it) }
             Prefs.KEY_X, Prefs.KEY_Y -> bubbles.firstOrNull { it.isRestart && it.restartPkg == null }?.let { b ->
                 if (prefs.posX < 0) defaultPosition(b) else clampAndApply(b, prefs.posX, prefs.posY)
             }
@@ -359,7 +364,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             addView(b.iv, FrameLayout.LayoutParams(sizePx - pad * 2, sizePx - pad * 2, Gravity.CENTER))
             addView(
                 badge,
-                FrameLayout.LayoutParams(dp(20), dp(20), Gravity.BOTTOM or Gravity.END)
+                (sizePx * 0.4f).toInt().coerceAtLeast(dp(12)).let { bs ->
+                    FrameLayout.LayoutParams(bs, bs, Gravity.BOTTOM or Gravity.END)
+                }
             )
         }
         b.lp = newLayoutParams(sizePx)
@@ -896,7 +903,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
         b.tv = TextView(this).apply {
             setTextColor(0xFFFFFFFF.toInt())
-            textSize = 10f
+            textSize = (10f * prefs.buttonSizeDp / 51f).coerceIn(7f, 14f) // 버튼 크기에 맞춰
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
             maxLines = 1

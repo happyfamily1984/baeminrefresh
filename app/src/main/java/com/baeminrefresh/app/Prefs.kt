@@ -12,6 +12,18 @@ class Prefs(context: Context) {
     private val sp: SharedPreferences =
         context.applicationContext.getSharedPreferences("baemin_refresh", Context.MODE_PRIVATE)
 
+    init {
+        // 1.21.0: 아이콘이 많아져서 기존 크기를 30% 줄인다 (한 번만)
+        if (!sp.getBoolean(KEY_SIZE_SHRINK_V1, false)) {
+            val e = sp.edit()
+            if (sp.contains(KEY_SIZE)) {
+                val old = sp.getInt(KEY_SIZE, DEFAULT_SIZE_DP)
+                e.putInt(KEY_SIZE, (old * 0.7f).toInt().coerceIn(MIN_SIZE_DP, MAX_SIZE_DP))
+            }
+            e.putBoolean(KEY_SIZE_SHRINK_V1, true).apply()
+        }
+    }
+
     var targetPackage: String?
         get() = sp.getString(KEY_TARGET, null)
         set(value) = sp.edit().putString(KEY_TARGET, value).apply()
@@ -201,6 +213,7 @@ class Prefs(context: Context) {
         const val KEY_TARGET = "target_package"
         const val KEY_ENABLED = "floating_enabled"
         const val KEY_SIZE = "button_size_dp"
+        const val KEY_SIZE_SHRINK_V1 = "size_shrink_v1_done"
         const val KEY_ALPHA = "button_alpha"
         const val KEY_X = "pos_x"
         const val KEY_Y = "pos_y"
@@ -223,8 +236,11 @@ class Prefs(context: Context) {
         const val KEY_PEE_X = "pee_pos_x"
         const val KEY_PEE_Y = "pee_pos_y"
 
-        const val MIN_SIZE_DP = 40
-        const val DEFAULT_SIZE_DP = 51
+        const val MIN_SIZE_DP = 24
+        const val MAX_SIZE_DP = 100
+        const val DEFAULT_SIZE_DP = 36
+        const val SIZE_SMALL_DP = 30
+        const val SIZE_LARGE_DP = 50
         const val MIN_ALPHA = 30
         const val DEFAULT_ALPHA = 60
     }

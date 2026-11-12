@@ -440,13 +440,22 @@ class MainActivity : AppCompatActivity() {
 
         val sizeLabel = findViewById<TextView>(R.id.size_label)
         val sizeSeek = findViewById<SeekBar>(R.id.size_seek)
+        sizeSeek.max = Prefs.MAX_SIZE_DP - Prefs.MIN_SIZE_DP
         sizeSeek.progress = prefs.buttonSizeDp - Prefs.MIN_SIZE_DP
-        sizeLabel.text = "버튼 크기: ${prefs.buttonSizeDp}"
+        sizeLabel.text = sizeText(prefs.buttonSizeDp)
         sizeSeek.setOnSeekBarChangeListener(SeekListener { p ->
             val v = Prefs.MIN_SIZE_DP + p
             prefs.buttonSizeDp = v
-            sizeLabel.text = "버튼 크기: $v"
+            sizeLabel.text = sizeText(v)
         })
+        val setSize = { v: Int ->
+            prefs.buttonSizeDp = v
+            sizeSeek.progress = v - Prefs.MIN_SIZE_DP
+            sizeLabel.text = sizeText(v)
+        }
+        findViewById<MaterialButton>(R.id.size_small).setOnClickListener { setSize(Prefs.SIZE_SMALL_DP) }
+        findViewById<MaterialButton>(R.id.size_normal).setOnClickListener { setSize(Prefs.DEFAULT_SIZE_DP) }
+        findViewById<MaterialButton>(R.id.size_large).setOnClickListener { setSize(Prefs.SIZE_LARGE_DP) }
 
         val alphaLabel = findViewById<TextView>(R.id.alpha_label)
         val alphaSeek = findViewById<SeekBar>(R.id.alpha_seek)
@@ -691,5 +700,12 @@ class MainActivity : AppCompatActivity() {
 
             • 재시작 후 배민커넥트에서 다시 '운행 시작'이 필요할 수 있어요. 앱을 완전히 껐다 켜는 것과 같아요.
         """.trimIndent()
+    }
+
+    private fun sizeText(v: Int): String = when (v) {
+        Prefs.SIZE_SMALL_DP -> "아이콘 크기: $v (작게)"
+        Prefs.DEFAULT_SIZE_DP -> "아이콘 크기: $v (보통)"
+        Prefs.SIZE_LARGE_DP -> "아이콘 크기: $v (크게)"
+        else -> "아이콘 크기: $v"
     }
 }
