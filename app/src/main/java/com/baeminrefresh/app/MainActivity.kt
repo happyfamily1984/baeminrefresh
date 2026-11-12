@@ -457,6 +457,16 @@ class MainActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.size_normal).setOnClickListener { setSize(Prefs.DEFAULT_SIZE_DP) }
         findViewById<MaterialButton>(R.id.size_large).setOnClickListener { setSize(Prefs.SIZE_LARGE_DP) }
 
+        val gapLabel = findViewById<TextView>(R.id.gap_label)
+        val gapSeek = findViewById<SeekBar>(R.id.gap_seek)
+        gapSeek.max = Prefs.MAX_GAP_DP
+        gapSeek.progress = prefs.buttonGapDp
+        gapLabel.text = gapText(prefs.buttonGapDp)
+        gapSeek.setOnSeekBarChangeListener(SeekListener { p ->
+            prefs.buttonGapDp = p
+            gapLabel.text = gapText(p)
+        })
+
         val alphaLabel = findViewById<TextView>(R.id.alpha_label)
         val alphaSeek = findViewById<SeekBar>(R.id.alpha_seek)
         alphaSeek.progress = prefs.buttonAlpha - Prefs.MIN_ALPHA
@@ -701,6 +711,9 @@ class MainActivity : AppCompatActivity() {
             • 재시작 후 배민커넥트에서 다시 '운행 시작'이 필요할 수 있어요. 앱을 완전히 껐다 켜는 것과 같아요.
         """.trimIndent()
     }
+
+    private fun gapText(v: Int): String =
+        if (v == 0) "아이콘 사이 간격: 0 (딱 붙임)" else "아이콘 사이 간격: $v"
 
     private fun sizeText(v: Int): String = when (v) {
         Prefs.SIZE_SMALL_DP -> "아이콘 크기: $v (작게)"

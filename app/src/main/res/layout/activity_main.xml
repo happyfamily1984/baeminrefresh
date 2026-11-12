@@ -196,6 +196,21 @@
                     </LinearLayout>
 
                     <TextView
+                        android:id="@+id/gap_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:textColor="@color/text_main"
+                        android:textSize="14sp" />
+
+                    <SeekBar
+                        android:id="@+id/gap_seek"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:max="30" />
+
+                    <TextView
                         android:id="@+id/alpha_label"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"

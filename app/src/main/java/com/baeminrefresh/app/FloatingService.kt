@@ -78,6 +78,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         super.onCreate()
         instance = this
         prefs = Prefs(this)
+        appliedGapDp = prefs.buttonGapDp
         pickOverlayHost()
         startAsForeground()
         if (!Settings.canDrawOverlays(this)) {
@@ -167,6 +168,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 peeHandler.postDelayed(rebuildForSize, 250L)
             }
             Prefs.KEY_ALPHA -> bubbles.forEach { applyAppearance(it) }
+            Prefs.KEY_GAP -> respaceStacks()
             Prefs.KEY_X, Prefs.KEY_Y -> bubbles.firstOrNull { it.isRestart && it.restartPkg == null }?.let { b ->
                 if (prefs.posX < 0) defaultPosition(b) else clampAndApply(b, prefs.posX, prefs.posY)
             }
@@ -1126,6 +1128,34 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
+    /**
+     * 간격 설정이 바뀌면: 같은 세로줄에 붙어 있는 아이콘들 사이를 새 간격으로 다시 맞춘다.
+     * (따로 떨어져 있는 아이콘은 그대로)
+     */
+    private var appliedGapDp = -1
+    private fun respaceStacks() {
+        val oldGap = dp(if (appliedGapDp >= 0) appliedGapDp else Prefs.DEFAULT_GAP_DP)
+        val newGap = dp(prefs.buttonGapDp)
+        appliedGapDp = prefs.buttonGapDp
+        val size = dp(prefs.buttonSizeDp)
+        val (_, h) = screenSize()
+        // '붙어 있다' 판정: 옛 간격보다 조금 여유를 둔다
+        val attachTh = size + maxOf(oldGap, dp(6)) + dp(4)
+        for ((_, col) in bubbles.groupBy { it.lp.x }) {
+            val sorted = col.sortedBy { it.lp.y }
+            val origY = sorted.map { it.lp.y } // 붙어 있는지는 옮기기 전 자리로 판단
+            for (i in 1 until sorted.size) {
+                val prev = sorted[i - 1]
+                val cur = sorted[i]
+                if (origY[i] - origY[i - 1] <= attachTh) {
+                    val ny = (prev.lp.y + size + newGap).coerceAtMost((h - size).coerceAtLeast(0))
+                    clampAndApply(cur, cur.lp.x, ny)
+                    savePositionAt(cur, cur.lp.x, cur.lp.y)
+                }
+            }
+        }
+    }
+
     /** 회전 등으로 다시 배치: 저장된 자리로 되돌린 뒤 서로 겹치지 않게 벌린다. */
     private fun repositionAll() {
         val done = mutableListOf<Bubble>()
@@ -1292,7 +1322,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun computeSnap(b: Bubble): Pair<Int, Int> {
         val (w, h) = screenSize()
         val size = b.lp.width
-        val gap = dp(2)
+        val gap = dp(prefs.buttonGapDp)
         val wallThreshold = dp(prefs.buttonSizeDp / 2)
         val snapDist = size + dp(prefs.buttonSizeDp / 2)
 
@@ -1347,7 +1377,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun resolveCollisionAgainst(b: Bubble, x: Int, y: Int, others: List<Bubble>): Pair<Int, Int> {
         val (_, h) = screenSize()
         val size = b.lp.width
-        val gap = dp(6)
+        val gap = dp(prefs.buttonGapDp)
+        val step = gap.coerceAtLeast(dp(2))
 
         fun overlaps(px: Int, py: Int): Boolean = others.any {
             abs(px - it.lp.x) < size + gap && abs(py - it.lp.y) < size + gap
@@ -1355,14 +1386,14 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         if (!overlaps(x, y)) return x to y
 
         val maxY = (h - size).coerceAtLeast(0)
-        var offset = gap
+        var offset = step
         while (offset <= h) {
             val down = (y + offset).coerceAtMost(maxY)
             if (!overlaps(x, down)) return x to down
             val up = (y - offset).coerceAtLeast(0)
             if (!overlaps(x, up)) return x to up
             if (down == maxY && up == 0) break
-            offset += gap
+            offset += step
         }
         return x to y
     }

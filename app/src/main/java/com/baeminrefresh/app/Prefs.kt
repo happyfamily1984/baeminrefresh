@@ -33,6 +33,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_ENABLED, false)
         set(value) = sp.edit().putBoolean(KEY_ENABLED, value).apply()
 
+    /** 붙어 있는 아이콘 사이 간격 (0 = 딱 붙음) */
+    var buttonGapDp: Int
+        get() = sp.getInt(KEY_GAP, DEFAULT_GAP_DP)
+        set(value) = sp.edit().putInt(KEY_GAP, value).apply()
+
     var buttonSizeDp: Int
         get() = sp.getInt(KEY_SIZE, DEFAULT_SIZE_DP)
         set(value) = sp.edit().putInt(KEY_SIZE, value).apply()
@@ -238,8 +243,11 @@ class Prefs(context: Context) {
 
         const val MIN_SIZE_DP = 24
         const val MAX_SIZE_DP = 100
-        const val DEFAULT_SIZE_DP = 36
+        const val DEFAULT_SIZE_DP = 40
         const val SIZE_SMALL_DP = 30
+        const val MAX_GAP_DP = 30
+        const val DEFAULT_GAP_DP = 2
+        const val KEY_GAP = "button_gap_dp"
         const val SIZE_LARGE_DP = 50
         const val MIN_ALPHA = 30
         const val DEFAULT_ALPHA = 60
