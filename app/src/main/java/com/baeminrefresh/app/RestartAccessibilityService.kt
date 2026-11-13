@@ -279,12 +279,13 @@ class RestartAccessibilityService : AccessibilityService() {
 
     /**
      * 픽커 주문 알림 팝업을 찾는다.
-     * 버튼 글자가 '상세보기' / '제휴오더 상세' 등으로 바뀌므로 '상세'가 들어간 버튼을 찾고,
-     * 앱 안의 주문 상세 화면을 잘못 잡지 않도록
-     *  - 같은 창에 거리 글자(예: 800m, 2.7km)가 있고
-     *  - 창이 화면 일부만 차지하는 작은 팝업이거나 앱 본 화면이 아닌 창일 때만 인정한다.
+     * 오른쪽 버튼 글자가 '상세보기' / '제휴오더 상세' / '수락' 등으로 계속 바뀌므로 버튼 글자에 의존하지 않는다.
+     * 대신 이런 창을 알림 팝업으로 본다:
+     *  - 픽커 앱의 창이고, 거리 글자(예: 800m, 15.9km)가 있으며
+     *  - 화면 일부만 차지하는 작은 팝업이거나 앱 본 화면이 아닌 창 (앱 안의 주문 화면은 제외)
+     * 반환: (창, 주문 글자들이 놓인 줄의 영역)
      */
-    private fun findKakaoPopup(pkg: String): Pair<AccessibilityNodeInfo, AccessibilityNodeInfo>? {
+    private fun findKakaoPopup(pkg: String): Pair<AccessibilityNodeInfo, Rect>? {
         val screenH = resources.displayMetrics.heightPixels
         val roots = mutableListOf<Pair<AccessibilityNodeInfo, Int>>()
         runCatching { for (w in windows) w.root?.let { roots.add(it to w.type) } }
@@ -296,59 +297,70 @@ class RestartAccessibilityService : AccessibilityService() {
             val smallPopup = !rb.isEmpty && rb.height() < screenH * 0.6f
             val notMainWindow = type != -1 &&
                 type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION
-            var detail: AccessibilityNodeInfo? = null
+            if (!smallPopup && !notMainWindow) continue
             var hasDistance = false
+            var row: Rect? = null
             forEachNode(r) { n ->
                 if (!n.isVisibleToUser) return@forEachNode
-                val t = (n.text ?: n.contentDescription)?.toString()?.replace(" ", "") ?: ""
-                if (detail == null && t.contains("상세") && !t.contains("거절")) detail = n
-                if (!hasDistance && distance.containsMatchIn(t)) hasDistance = true
+                val t = (n.text ?: n.contentDescription)?.toString()?.trim() ?: ""
+                if (t.isEmpty()) return@forEachNode
+                if (distance.containsMatchIn(t.replace(" ", ""))) hasDistance = true
+                val b = Rect().also { n.getBoundsInScreen(it) }
+                if (b.isEmpty) return@forEachNode
+                row = row?.apply { union(b) } ?: Rect(b)
             }
-            val d = detail ?: continue
+            val rowRect = row ?: continue
             if (!hasDistance) continue
-            if (!smallPopup && !notMainWindow) continue
-            return r to d
+            return r to rowRect
         }
         return null
     }
 
-    private fun dismissKakao(root: AccessibilityNodeInfo, detail: AccessibilityNodeInfo) {
-        val detailRect = Rect().also { detail.getBoundsInScreen(it) }
-        // 1) '닫기/close' 라벨이 붙은 버튼 ('거절'은 누르지 않음)
+    /** 누르면 안 되는 버튼 (주문 수락·상세·거절) */
+    private fun isForbidden(n: AccessibilityNodeInfo): Boolean {
+        val t = listOfNotNull(n.text, n.contentDescription).joinToString(" ").replace(" ", "")
+        return t.contains("수락") || t.contains("상세") || t.contains("거절") || t.contains("배차")
+    }
+
+    private fun dismissKakao(root: AccessibilityNodeInfo, row: Rect) {
+        // 1) '닫기/close' 라벨이 붙은 버튼
         val close = findNode(root) { n ->
             val t = listOfNotNull(n.text, n.contentDescription, n.viewIdResourceName)
                 .joinToString(" ").lowercase()
-            !t.contains("거절") && (t.contains("닫기") || t.contains("close") || t.trim() == "x" || t.trim() == "×")
+            !isForbidden(n) && (t.contains("닫기") || t.contains("close") || t.trim() == "x" || t.trim() == "×")
         }
         if (close != null && clickNodeOrParent(close)) return
 
-        // 2) 주문 글자들보다 왼쪽에 있고 같은 줄에 걸친 누를 수 있는 것 중 가장 왼쪽
-        val textLeft = leftmostTextLeft(root, detailRect)
+        // 주문 글자 중 가장 왼쪽 위치 (X 버튼은 그보다 왼쪽에 있다)
+        val textLeft = leftmostTextLeft(root, row)
+
+        // 2) 주문 글자보다 왼쪽, 같은 줄에 걸친 누를 수 있는 것 중 가장 왼쪽
         var best: AccessibilityNodeInfo? = null
         var bestLeft = Int.MAX_VALUE
         forEachNode(root) { n ->
-            if (!n.isClickable || !n.isVisibleToUser) return@forEachNode
+            if (!n.isClickable || !n.isVisibleToUser || isForbidden(n)) return@forEachNode
             val r = Rect().also { n.getBoundsInScreen(it) }
-            if (r.isEmpty || r.contains(detailRect)) return@forEachNode
-            val sameRow = r.bottom > detailRect.top && r.top < detailRect.bottom
+            if (r.isEmpty) return@forEachNode
+            val sameRow = r.bottom > row.top && r.top < row.bottom
             if (sameRow && textLeft != null && r.right <= textLeft + 4 && r.left < bestLeft) {
                 best = n; bestLeft = r.left
             }
         }
         if (best?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return
 
-        // 3) 버튼 정보가 없으면, X가 있는 자리(팝업 왼쪽 끝 ~ 주문 글자 사이)를 직접 탭
+        // 3) 버튼 정보가 없으면, X 자리(팝업 왼쪽 끝 ~ 주문 글자 사이, 줄 가운데)를 직접 탭
         val rootRect = Rect().also { root.getBoundsInScreen(it) }
-        val barLeft = leftmostNodeLeft(root, detailRect) ?: rootRect.left
-        val x = if (textLeft != null && textLeft > barLeft) (barLeft + textLeft) / 2
-        else barLeft + detailRect.height() / 2
-        tap(x.toFloat(), detailRect.exactCenterY())
+        val barLeft = leftmostNodeLeft(root, row) ?: rootRect.left
+        val left = textLeft ?: row.left
+        val x = if (left > barLeft + 8) (barLeft + left) / 2 else barLeft + row.height() / 4
+        tap(x.toFloat(), row.exactCenterY())
     }
 
     private fun clickNodeOrParent(n: AccessibilityNodeInfo): Boolean {
         var cur: AccessibilityNodeInfo? = n
         var depth = 0
         while (cur != null && depth < 4) {
+            if (isForbidden(cur)) return false
             if (cur.isClickable && cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
             cur = cur.parent
             depth++
@@ -356,25 +368,26 @@ class RestartAccessibilityService : AccessibilityService() {
         return false
     }
 
-    /** 상세보기와 같은 줄에 있는 글자 중 가장 왼쪽 위치 */
+    /** 줄에 있는 글자 중 가장 왼쪽 위치 */
     private fun leftmostTextLeft(root: AccessibilityNodeInfo, row: Rect): Int? {
         var min: Int? = null
         forEachNode(root) { n ->
             if (n.text.isNullOrBlank() || !n.isVisibleToUser) return@forEachNode
             val r = Rect().also { n.getBoundsInScreen(it) }
-            if (r.isEmpty || r.left >= row.left) return@forEachNode
+            if (r.isEmpty) return@forEachNode
             if (r.bottom > row.top && r.top < row.bottom) min = minOf(min ?: r.left, r.left)
         }
         return min
     }
 
-    /** 상세보기와 같은 줄에 걸친 화면 요소 중 가장 왼쪽 끝 (= 팝업 왼쪽 끝) */
+    /** 줄에 걸친 화면 요소 중 가장 왼쪽 끝 (= 팝업 왼쪽 끝) */
     private fun leftmostNodeLeft(root: AccessibilityNodeInfo, row: Rect): Int? {
+        val screenW = resources.displayMetrics.widthPixels
         var min: Int? = null
         forEachNode(root) { n ->
             if (!n.isVisibleToUser) return@forEachNode
             val r = Rect().also { n.getBoundsInScreen(it) }
-            if (r.isEmpty || r.contains(row) && r.width() > row.width() * 6) return@forEachNode // 화면 전체 배경은 제외
+            if (r.isEmpty || r.width() >= screenW && r.height() > row.height() * 3) return@forEachNode // 화면 전체 배경 제외
             if (r.bottom > row.top && r.top < row.bottom) min = minOf(min ?: r.left, r.left)
         }
         return min
