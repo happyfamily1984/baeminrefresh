@@ -104,6 +104,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        setupKakaoDismiss()
+
         if (Features.PEE) {
             findViewById<View>(R.id.pee_card).visibility = View.VISIBLE
             val peeSwitch = findViewById<MaterialSwitch>(R.id.pee_switch)
@@ -710,6 +712,62 @@ class MainActivity : AppCompatActivity() {
 
             • 재시작 후 배민커넥트에서 다시 '운행 시작'이 필요할 수 있어요. 앱을 완전히 껐다 켜는 것과 같아요.
         """.trimIndent()
+    }
+
+    private fun setupKakaoDismiss() {
+        val sw = findViewById<MaterialSwitch>(R.id.kakao_switch)
+        sw.isChecked = prefs.kakaoDismissEnabled
+        sw.setOnCheckedChangeListener { _, checked ->
+            prefs.kakaoDismissEnabled = checked
+            if (checked) {
+                if (kakaoPackageOrDetect() == null) {
+                    Toast.makeText(this, "카카오퀵 앱을 못 찾았어요. 아래에서 앱을 골라 주세요", Toast.LENGTH_LONG).show()
+                    showKakaoAppPicker()
+                } else if (RestartAccessibilityService.instance == null) {
+                    Toast.makeText(this, "접근성에서 '배민리프레시'를 켜야 동작해요", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        val label = findViewById<TextView>(R.id.kakao_seconds_label)
+        val seek = findViewById<SeekBar>(R.id.kakao_seconds_seek)
+        seek.progress = prefs.kakaoDismissSeconds.coerceIn(1, 10) - 1
+        label.text = "알림 뜨고 ${prefs.kakaoDismissSeconds}초 뒤에 닫기"
+        seek.setOnSeekBarChangeListener(SeekListener { p ->
+            prefs.kakaoDismissSeconds = p + 1
+            label.text = "알림 뜨고 ${p + 1}초 뒤에 닫기"
+        })
+        findViewById<MaterialButton>(R.id.kakao_app_button).setOnClickListener { showKakaoAppPicker() }
+        updateKakaoAppButton()
+    }
+
+    private fun kakaoPackageOrDetect(): String? =
+        prefs.kakaoPackage ?: TargetApps.detectKakaoQuick(this)?.packageName
+
+    private fun updateKakaoAppButton() {
+        val pkg = kakaoPackageOrDetect()
+        val name = pkg?.let { TargetApps.labelOf(this, it) }
+        findViewById<MaterialButton>(R.id.kakao_app_button).text =
+            if (name != null) "대상 앱: $name (바꾸기)" else "대상 앱 고르기 (카카오퀵)"
+    }
+
+    private fun showKakaoAppPicker() {
+        val apps = TargetApps.launchableApps(this)
+            .sortedByDescending { TargetApps.kakaoScore(it) }
+        if (apps.isEmpty()) return
+        val items = apps.map {
+            val star = if (TargetApps.kakaoScore(it) > 0) "★ " else ""
+            "$star${it.label}\n${it.packageName}"
+        }.toTypedArray()
+        val current = apps.indexOfFirst { it.packageName == kakaoPackageOrDetect() }
+        AlertDialog.Builder(this)
+            .setTitle("카카오퀵 앱을 고르세요")
+            .setSingleChoiceItems(items, current) { dialog, which ->
+                prefs.kakaoPackage = apps[which].packageName
+                dialog.dismiss()
+                updateKakaoAppButton()
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun gapText(v: Int): String =

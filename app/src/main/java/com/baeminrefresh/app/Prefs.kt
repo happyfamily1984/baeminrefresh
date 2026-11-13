@@ -38,6 +38,20 @@ class Prefs(context: Context) {
         get() = sp.getInt(KEY_GAP, DEFAULT_GAP_DP)
         set(value) = sp.edit().putInt(KEY_GAP, value).apply()
 
+    /** 실험실: 카카오퀵 주문 알림 팝업을 N초 뒤 자동으로 닫기 */
+    var kakaoDismissEnabled: Boolean
+        get() = sp.getBoolean(KEY_KAKAO_DISMISS, false)
+        set(value) = sp.edit().putBoolean(KEY_KAKAO_DISMISS, value).apply()
+
+    var kakaoDismissSeconds: Int
+        get() = sp.getInt(KEY_KAKAO_SECONDS, 3)
+        set(value) = sp.edit().putInt(KEY_KAKAO_SECONDS, value).apply()
+
+    /** 카카오퀵 기사용 앱 패키지 (null이면 자동 감지) */
+    var kakaoPackage: String?
+        get() = sp.getString(KEY_KAKAO_PKG, null)
+        set(value) = sp.edit().putString(KEY_KAKAO_PKG, value).apply()
+
     var buttonSizeDp: Int
         get() = sp.getInt(KEY_SIZE, DEFAULT_SIZE_DP)
         set(value) = sp.edit().putInt(KEY_SIZE, value).apply()
@@ -218,6 +232,9 @@ class Prefs(context: Context) {
         const val KEY_TARGET = "target_package"
         const val KEY_ENABLED = "floating_enabled"
         const val KEY_SIZE = "button_size_dp"
+        const val KEY_KAKAO_DISMISS = "lab_kakao_dismiss"
+        const val KEY_KAKAO_SECONDS = "lab_kakao_seconds"
+        const val KEY_KAKAO_PKG = "lab_kakao_pkg"
         const val KEY_SIZE_SHRINK_V1 = "size_shrink_v1_done"
         const val KEY_ALPHA = "button_alpha"
         const val KEY_X = "pos_x"

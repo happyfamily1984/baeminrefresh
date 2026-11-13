@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.graphics.Rect
 
 /**
  * 대상 앱의 '앱 정보' 화면을 열고 '강제 중지' → '확인'을 자동으로 눌러 앱을 종료한 뒤,
@@ -204,6 +205,192 @@ class RestartAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (state == State.WAIT_FORCE_STOP || state == State.WAIT_CONFIRM) step()
+        if (event != null) onKakaoEvent(event)
+    }
+
+    // ---------------- 실험실: 카카오퀵 주문 알림 자동 닫기 ----------------
+    // 화면 좌표를 고정하지 않고, 매번 화면에서 '상세보기'가 있는 팝업을 찾아
+    // 그 팝업의 X(닫기) 버튼을 찾아 누른다. (창 위치가 바뀌어도 동작)
+
+    private val prefs by lazy { Prefs(this) }
+    private var kakaoPkgCache: String? = null
+    private var kakaoPkgCheckedAt = 0L
+    private var kakaoSig: String? = null
+    private var kakaoSeenAt = 0L
+    private var kakaoTries = 0
+    private var kakaoLastCheck = 0L
+    private val kakaoTimer = Runnable { checkKakao() }
+
+    private fun kakaoPkg(): String? {
+        prefs.kakaoPackage?.let { return it }
+        val now = SystemClock.uptimeMillis()
+        if (kakaoPkgCache == null && now - kakaoPkgCheckedAt > 60_000L || kakaoPkgCheckedAt == 0L) {
+            kakaoPkgCheckedAt = now
+            kakaoPkgCache = runCatching { TargetApps.detectKakaoQuick(this)?.packageName }.getOrNull()
+        }
+        return kakaoPkgCache
+    }
+
+    private fun onKakaoEvent(event: AccessibilityEvent) {
+        if (!prefs.kakaoDismissEnabled) return
+        val pkg = kakaoPkg() ?: return
+        val evPkg = event.packageName?.toString()
+        if (evPkg != pkg && event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return
+        val now = SystemClock.uptimeMillis()
+        if (now - kakaoLastCheck < 250L) { // 너무 자주 검사하지 않게
+            handler.removeCallbacks(kakaoTimer)
+            handler.postDelayed(kakaoTimer, 300L)
+            return
+        }
+        checkKakao()
+    }
+
+    private fun checkKakao() {
+        kakaoLastCheck = SystemClock.uptimeMillis()
+        handler.removeCallbacks(kakaoTimer)
+        if (!prefs.kakaoDismissEnabled) return
+        val pkg = kakaoPkg() ?: return
+        val popup = findKakaoPopup(pkg)
+        if (popup == null) { // 팝업이 사라짐 → 초기화
+            kakaoSig = null
+            kakaoTries = 0
+            return
+        }
+        val (root, detail) = popup
+        // 숫자(남은 시간 등)는 빼고 비교 → 같은 주문이면 타이머 유지, 다른 주문이면 새로 시작
+        val sig = collectTexts(root).replace(Regex("[0-9.,\\s]"), "")
+        val now = SystemClock.uptimeMillis()
+        if (sig != kakaoSig) {
+            kakaoSig = sig
+            kakaoSeenAt = now
+            kakaoTries = 0
+        }
+        val waitMs = prefs.kakaoDismissSeconds.coerceIn(1, 10) * 1000L
+        val remain = kakaoSeenAt + waitMs - now
+        if (remain > 30L) {
+            handler.postDelayed(kakaoTimer, remain)
+            return
+        }
+        if (kakaoTries >= 3) return // 몇 번 눌러도 안 닫히면 포기 (무한 반복 방지)
+        kakaoTries++
+        dismissKakao(root, detail)
+        handler.postDelayed(kakaoTimer, 800L) // 닫혔는지 확인, 안 닫혔으면 다시 시도
+    }
+
+    /** 카카오퀵 창 중 '상세보기' 글자가 있는 팝업을 찾는다. */
+    private fun findKakaoPopup(pkg: String): Pair<AccessibilityNodeInfo, AccessibilityNodeInfo>? {
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        runCatching { for (w in windows) w.root?.let { roots.add(it) } }
+        rootInActiveWindow?.let { roots.add(it) }
+        for (r in roots) {
+            if (r.packageName?.toString() != pkg) continue
+            val d = findNode(r) { n ->
+                val t = (n.text ?: n.contentDescription)?.toString()?.replace(" ", "") ?: ""
+                t.contains("상세보기") && n.isVisibleToUser
+            }
+            if (d != null) return r to d
+        }
+        return null
+    }
+
+    private fun dismissKakao(root: AccessibilityNodeInfo, detail: AccessibilityNodeInfo) {
+        val detailRect = Rect().also { detail.getBoundsInScreen(it) }
+        // 1) '닫기/close' 라벨이 붙은 버튼 ('거절'은 누르지 않음)
+        val close = findNode(root) { n ->
+            val t = listOfNotNull(n.text, n.contentDescription, n.viewIdResourceName)
+                .joinToString(" ").lowercase()
+            !t.contains("거절") && (t.contains("닫기") || t.contains("close") || t.trim() == "x" || t.trim() == "×")
+        }
+        if (close != null && clickNodeOrParent(close)) return
+
+        // 2) 주문 글자들보다 왼쪽에 있고 같은 줄에 걸친 누를 수 있는 것 중 가장 왼쪽
+        val textLeft = leftmostTextLeft(root, detailRect)
+        var best: AccessibilityNodeInfo? = null
+        var bestLeft = Int.MAX_VALUE
+        forEachNode(root) { n ->
+            if (!n.isClickable || !n.isVisibleToUser) return@forEachNode
+            val r = Rect().also { n.getBoundsInScreen(it) }
+            if (r.isEmpty || r.contains(detailRect)) return@forEachNode
+            val sameRow = r.bottom > detailRect.top && r.top < detailRect.bottom
+            if (sameRow && textLeft != null && r.right <= textLeft + 4 && r.left < bestLeft) {
+                best = n; bestLeft = r.left
+            }
+        }
+        if (best?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return
+
+        // 3) 버튼 정보가 없으면, X가 있는 자리(팝업 왼쪽 끝 ~ 주문 글자 사이)를 직접 탭
+        val rootRect = Rect().also { root.getBoundsInScreen(it) }
+        val barLeft = leftmostNodeLeft(root, detailRect) ?: rootRect.left
+        val x = if (textLeft != null && textLeft > barLeft) (barLeft + textLeft) / 2
+        else barLeft + detailRect.height() / 2
+        tap(x.toFloat(), detailRect.exactCenterY())
+    }
+
+    private fun clickNodeOrParent(n: AccessibilityNodeInfo): Boolean {
+        var cur: AccessibilityNodeInfo? = n
+        var depth = 0
+        while (cur != null && depth < 4) {
+            if (cur.isClickable && cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            cur = cur.parent
+            depth++
+        }
+        return false
+    }
+
+    /** 상세보기와 같은 줄에 있는 글자 중 가장 왼쪽 위치 */
+    private fun leftmostTextLeft(root: AccessibilityNodeInfo, row: Rect): Int? {
+        var min: Int? = null
+        forEachNode(root) { n ->
+            if (n.text.isNullOrBlank() || !n.isVisibleToUser) return@forEachNode
+            val r = Rect().also { n.getBoundsInScreen(it) }
+            if (r.isEmpty || r.left >= row.left) return@forEachNode
+            if (r.bottom > row.top && r.top < row.bottom) min = minOf(min ?: r.left, r.left)
+        }
+        return min
+    }
+
+    /** 상세보기와 같은 줄에 걸친 화면 요소 중 가장 왼쪽 끝 (= 팝업 왼쪽 끝) */
+    private fun leftmostNodeLeft(root: AccessibilityNodeInfo, row: Rect): Int? {
+        var min: Int? = null
+        forEachNode(root) { n ->
+            if (!n.isVisibleToUser) return@forEachNode
+            val r = Rect().also { n.getBoundsInScreen(it) }
+            if (r.isEmpty || r.contains(row) && r.width() > row.width() * 6) return@forEachNode // 화면 전체 배경은 제외
+            if (r.bottom > row.top && r.top < row.bottom) min = minOf(min ?: r.left, r.left)
+        }
+        return min
+    }
+
+    private fun tap(x: Float, y: Float) {
+        val path = android.graphics.Path().apply { moveTo(x, y) }
+        val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 60)
+        runCatching {
+            dispatchGesture(android.accessibilityservice.GestureDescription.Builder().addStroke(stroke).build(), null, null)
+        }
+    }
+
+    private fun collectTexts(root: AccessibilityNodeInfo): String {
+        val sb = StringBuilder()
+        forEachNode(root) { n -> n.text?.let { if (sb.length < 500) sb.append(it).append('|') } }
+        return sb.toString()
+    }
+
+    private fun findNode(root: AccessibilityNodeInfo, pred: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        var found: AccessibilityNodeInfo? = null
+        forEachNode(root) { if (found == null && pred(it)) found = it }
+        return found
+    }
+
+    private fun forEachNode(root: AccessibilityNodeInfo, action: (AccessibilityNodeInfo) -> Unit) {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var count = 0
+        while (queue.isNotEmpty() && count < 1500) {
+            val n = queue.removeFirst()
+            count++
+            action(n)
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
     }
 
     val isBusy: Boolean get() = state != State.IDLE

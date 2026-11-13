@@ -36,6 +36,22 @@ object TargetApps {
         }
     }
 
+    /** 카카오퀵(기사용) 앱으로 보이는 앱을 찾는다. 못 찾으면 null */
+    fun detectKakaoQuick(context: Context): AppEntry? =
+        launchableApps(context).filter { kakaoScore(it) > 0 }.maxByOrNull { kakaoScore(it) }
+
+    fun kakaoScore(e: AppEntry): Int {
+        val label = e.label.replace(" ", "").lowercase()
+        val pkg = e.packageName.lowercase()
+        return when {
+            label.contains("카카오") && label.contains("퀵") -> 4
+            pkg.contains("kakao") && (pkg.contains("quick") || pkg.contains("picker")) -> 3
+            label.contains("퀵") && (label.contains("기사") || label.contains("픽커")) -> 2
+            pkg.contains("kakao") && pkg.contains("driver") -> 1
+            else -> 0
+        }
+    }
+
     fun labelOf(context: Context, pkg: String): String? = try {
         val pm = context.packageManager
         pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
