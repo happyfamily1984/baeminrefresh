@@ -44,6 +44,7 @@ object TargetApps {
         val label = e.label.replace(" ", "").lowercase()
         val pkg = e.packageName.lowercase()
         return when {
+            label.contains("카카오") && label.contains("픽커") -> 5 // 카카오 T 픽커
             label.contains("카카오") && label.contains("퀵") -> 4
             pkg.contains("kakao") && (pkg.contains("quick") || pkg.contains("picker")) -> 3
             label.contains("퀵") && (label.contains("기사") || label.contains("픽커")) -> 2

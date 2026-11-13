@@ -277,18 +277,37 @@ class RestartAccessibilityService : AccessibilityService() {
         handler.postDelayed(kakaoTimer, 800L) // 닫혔는지 확인, 안 닫혔으면 다시 시도
     }
 
-    /** 카카오퀵 창 중 '상세보기' 글자가 있는 팝업을 찾는다. */
+    /**
+     * 픽커 주문 알림 팝업을 찾는다.
+     * 버튼 글자가 '상세보기' / '제휴오더 상세' 등으로 바뀌므로 '상세'가 들어간 버튼을 찾고,
+     * 앱 안의 주문 상세 화면을 잘못 잡지 않도록
+     *  - 같은 창에 거리 글자(예: 800m, 2.7km)가 있고
+     *  - 창이 화면 일부만 차지하는 작은 팝업이거나 앱 본 화면이 아닌 창일 때만 인정한다.
+     */
     private fun findKakaoPopup(pkg: String): Pair<AccessibilityNodeInfo, AccessibilityNodeInfo>? {
-        val roots = mutableListOf<AccessibilityNodeInfo>()
-        runCatching { for (w in windows) w.root?.let { roots.add(it) } }
-        rootInActiveWindow?.let { roots.add(it) }
-        for (r in roots) {
+        val screenH = resources.displayMetrics.heightPixels
+        val roots = mutableListOf<Pair<AccessibilityNodeInfo, Int>>()
+        runCatching { for (w in windows) w.root?.let { roots.add(it to w.type) } }
+        rootInActiveWindow?.let { roots.add(it to -1) }
+        val distance = Regex("\\d+(\\.\\d+)?\\s*k?m")
+        for ((r, type) in roots) {
             if (r.packageName?.toString() != pkg) continue
-            val d = findNode(r) { n ->
+            val rb = Rect().also { r.getBoundsInScreen(it) }
+            val smallPopup = !rb.isEmpty && rb.height() < screenH * 0.6f
+            val notMainWindow = type != -1 &&
+                type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION
+            var detail: AccessibilityNodeInfo? = null
+            var hasDistance = false
+            forEachNode(r) { n ->
+                if (!n.isVisibleToUser) return@forEachNode
                 val t = (n.text ?: n.contentDescription)?.toString()?.replace(" ", "") ?: ""
-                t.contains("상세보기") && n.isVisibleToUser
+                if (detail == null && t.contains("상세") && !t.contains("거절")) detail = n
+                if (!hasDistance && distance.containsMatchIn(t)) hasDistance = true
             }
-            if (d != null) return r to d
+            val d = detail ?: continue
+            if (!hasDistance) continue
+            if (!smallPopup && !notMainWindow) continue
+            return r to d
         }
         return null
     }

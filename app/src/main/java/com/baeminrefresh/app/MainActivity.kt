@@ -721,7 +721,7 @@ class MainActivity : AppCompatActivity() {
             prefs.kakaoDismissEnabled = checked
             if (checked) {
                 if (kakaoPackageOrDetect() == null) {
-                    Toast.makeText(this, "카카오퀵 앱을 못 찾았어요. 아래에서 앱을 골라 주세요", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "카카오 T 픽커 앱을 못 찾았어요. 아래에서 앱을 골라 주세요", Toast.LENGTH_LONG).show()
                     showKakaoAppPicker()
                 } else if (RestartAccessibilityService.instance == null) {
                     Toast.makeText(this, "접근성에서 '배민리프레시'를 켜야 동작해요", Toast.LENGTH_LONG).show()
@@ -747,7 +747,7 @@ class MainActivity : AppCompatActivity() {
         val pkg = kakaoPackageOrDetect()
         val name = pkg?.let { TargetApps.labelOf(this, it) }
         findViewById<MaterialButton>(R.id.kakao_app_button).text =
-            if (name != null) "대상 앱: $name (바꾸기)" else "대상 앱 고르기 (카카오퀵)"
+            if (name != null) "대상 앱: $name (바꾸기)" else "대상 앱 고르기 (카카오 T 픽커)"
     }
 
     private fun showKakaoAppPicker() {
@@ -760,7 +760,7 @@ class MainActivity : AppCompatActivity() {
         }.toTypedArray()
         val current = apps.indexOfFirst { it.packageName == kakaoPackageOrDetect() }
         AlertDialog.Builder(this)
-            .setTitle("카카오퀵 앱을 고르세요")
+            .setTitle("카카오 T 픽커 앱을 고르세요")
             .setSingleChoiceItems(items, current) { dialog, which ->
                 prefs.kakaoPackage = apps[which].packageName
                 dialog.dismiss()

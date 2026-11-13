@@ -557,7 +557,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="🔕 카카오퀵 알림 자동 닫기"
+                                android:text="🔕 카카오 T 픽커 알림 자동 닫기"
                                 android:textColor="@color/text_main"
                                 android:textSize="16sp"
                                 android:textStyle="bold" />
@@ -567,7 +567,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
                                 android:lineSpacingExtra="2dp"
-                                android:text="카카오퀵 주문 알림 창이 뜨고 정해진 시간이 지나면 왼쪽 X를 눌러 창을 닫아요. 창 위치가 바뀌어도 찾아서 눌러요. (접근성 필요)"
+                                android:text="카카오 T 픽커(카카오퀵) 주문 알림 창이 뜨고 정해진 시간이 지나면 왼쪽 X를 눌러 창을 닫아요. 창 위치가 바뀌어도 찾아서 눌러요. (접근성 필요)"
                                 android:textColor="@color/text_sub"
                                 android:textSize="13sp" />
                         </LinearLayout>
