@@ -72,6 +72,7 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<MaterialButton>(R.id.add_sticker_button).setOnClickListener { showStickerPicker() }
         findViewById<MaterialButton>(R.id.add_restart_app_button).setOnClickListener { showRestartAppPicker() }
+        findViewById<MaterialButton>(R.id.add_folder_button).setOnClickListener { showFolderCreator() }
 
         val labSwitch = findViewById<MaterialSwitch>(R.id.lab_landscape_switch)
         labSwitch.isChecked = prefs.labPauseStickersLandscape
@@ -713,6 +714,43 @@ class MainActivity : AppCompatActivity() {
 
             • 재시작 후 배민커넥트에서 다시 '운행 시작'이 필요할 수 있어요. 앱을 완전히 껐다 켜는 것과 같아요.
         """.trimIndent()
+    }
+
+    /** 지금 떠 있는 버튼 중 폴더에 안 들어간 것들을 골라 폴더를 만든다. */
+    private fun showFolderCreator() {
+        val inFolder = prefs.getFolders().flatMap { it.members }.toSet()
+        val items = mutableListOf<Pair<String, String>>() // 키 to 이름
+        if (prefs.showMainRestart) items += "main" to "배민리프레시 재시작(기본 버튼)"
+        for (a in prefs.getRestartApps()) {
+            items += "rapp:${a.packageName}" to "재시작: ${TargetApps.labelOf(this, a.packageName) ?: a.packageName}"
+        }
+        for (s in prefs.getStickers()) {
+            items += "sticker:${s.packageName}" to "스티커: ${TargetApps.labelOf(this, s.packageName) ?: s.packageName}"
+        }
+        if (prefs.captureButtonEnabled) items += "capture" to "화면 캡쳐"
+        if (prefs.voiceButtonEnabled) items += "voice" to "음성 입력"
+        if (Features.PEE && prefs.peeTrackerEnabled) items += "pee" to "워터 타이머"
+        val avail = items.filter { it.first !in inFolder }
+        if (avail.size < 2) {
+            Toast.makeText(this, "폴더에 넣을 수 있는 버튼이 2개 이상 있어야 해요", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val checked = BooleanArray(avail.size)
+        AlertDialog.Builder(this)
+            .setTitle("폴더에 넣을 버튼을 고르세요 (2개 이상)")
+            .setMultiChoiceItems(avail.map { it.second }.toTypedArray(), checked) { _, i, c -> checked[i] = c }
+            .setPositiveButton("만들기") { _, _ ->
+                val sel = avail.filterIndexed { i, _ -> checked[i] }.map { it.first }
+                if (sel.size < 2) {
+                    Toast.makeText(this, "2개 이상 골라 주세요", Toast.LENGTH_SHORT).show()
+                } else {
+                    prefs.addFolder(sel)
+                    val msg = if (FloatingService.isRunning) "폴더를 만들었어요" else "폴더를 만들었어요. 위에서 '플로팅 버튼 표시'를 켜면 나타나요"
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun setupKakaoDismiss() {

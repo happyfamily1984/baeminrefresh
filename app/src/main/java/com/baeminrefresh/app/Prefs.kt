@@ -8,6 +8,12 @@ import org.json.JSONObject
 /** 앱 스티커: 특정 앱의 아이콘으로 된 플로팅 버튼. 누르면 그 앱이 실행된다. */
 data class Sticker(val packageName: String, val x: Int = -1, val y: Int = -1)
 
+/**
+ * 플로팅 버튼 폴더. members 는 버튼 키:
+ * "main"(기본 재시작) / "rapp:패키지" / "sticker:패키지" / "capture" / "voice" / "pee"
+ */
+data class Folder(val id: Int, val x: Int, val y: Int, val members: List<String>)
+
 class Prefs(context: Context) {
     private val sp: SharedPreferences =
         context.applicationContext.getSharedPreferences("baemin_refresh", Context.MODE_PRIVATE)
@@ -245,6 +251,80 @@ class Prefs(context: Context) {
         setRestartApps(getRestartApps().map { if (it.packageName == pkg) it.copy(x = x, y = y) else it })
     }
 
+    // ---------------- 폴더 ----------------
+
+    fun getFolders(): List<Folder> {
+        val raw = sp.getString(KEY_FOLDERS, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                val m = o.getJSONArray("members")
+                Folder(o.getInt("id"), o.optInt("x", -1), o.optInt("y", -1), (0 until m.length()).map { m.getString(it) })
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun setFolders(list: List<Folder>) {
+        val arr = JSONArray()
+        for (f in list) {
+            arr.put(
+                JSONObject().put("id", f.id).put("x", f.x).put("y", f.y)
+                    .put("members", JSONArray().apply { f.members.forEach { put(it) } })
+            )
+        }
+        sp.edit().putString(KEY_FOLDERS, arr.toString()).apply()
+    }
+
+    /** 폴더를 만든다. 폴더 위치는 첫 번째 버튼이 있던 자리(없으면 기본 위치). */
+    fun addFolder(members: List<String>) {
+        val list = getFolders()
+        val id = (list.maxOfOrNull { it.id } ?: 0) + 1
+        val (x, y) = members.firstNotNullOfOrNull { k -> savedPosOfKey(k).takeIf { it.first >= 0 && it.second >= 0 } }
+            ?: (-1 to -1)
+        setFolders(list + Folder(id, x, y, members))
+    }
+
+    fun removeFolder(id: Int) {
+        setFolders(getFolders().filterNot { it.id == id })
+    }
+
+    fun updateFolderPosition(id: Int, x: Int, y: Int) {
+        setFolders(getFolders().map { if (it.id == id) it.copy(x = x, y = y) else it })
+    }
+
+    /** 없어진 버튼은 폴더에서 빼고, 버튼이 2개 미만인 폴더는 없앤다. 바뀐 게 있을 때만 저장. */
+    fun pruneFolders(valid: Set<String>) {
+        val old = getFolders()
+        val new = old.map { f -> f.copy(members = f.members.filter { it in valid }) }.filter { it.members.size >= 2 }
+        if (new != old) setFolders(new)
+    }
+
+    fun savedPosOfKey(key: String): Pair<Int, Int> = when {
+        key == "main" -> posX to posY
+        key == "capture" -> capturePosX to capturePosY
+        key == "voice" -> voicePosX to voicePosY
+        key == "pee" -> peePosX to peePosY
+        key.startsWith("rapp:") -> getRestartApps().firstOrNull { it.packageName == key.removePrefix("rapp:") }
+            ?.let { it.x to it.y } ?: (-1 to -1)
+        key.startsWith("sticker:") -> getStickers().firstOrNull { it.packageName == key.removePrefix("sticker:") }
+            ?.let { it.x to it.y } ?: (-1 to -1)
+        else -> -1 to -1
+    }
+
+    fun setSavedPosOfKey(key: String, x: Int, y: Int) {
+        when {
+            key == "main" -> { posX = x; posY = y }
+            key == "capture" -> { capturePosX = x; capturePosY = y }
+            key == "voice" -> { voicePosX = x; voicePosY = y }
+            key == "pee" -> { peePosX = x; peePosY = y }
+            key.startsWith("rapp:") -> updateRestartAppPosition(key.removePrefix("rapp:"), x, y)
+            key.startsWith("sticker:") -> updateStickerPosition(key.removePrefix("sticker:"), x, y)
+        }
+    }
+
     fun registerListener(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         sp.registerOnSharedPreferenceChangeListener(l)
 
@@ -255,6 +335,7 @@ class Prefs(context: Context) {
         const val KEY_TARGET = "target_package"
         const val KEY_ENABLED = "floating_enabled"
         const val KEY_SIZE = "button_size_dp"
+        const val KEY_FOLDERS = "folders"
         const val KEY_CALL_BOOST = "lab_call_boost"
         const val KEY_CALL_ACTIVE = "lab_call_active"
         const val KEY_CALL_LEVEL = "lab_call_level"

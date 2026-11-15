@@ -52,7 +52,23 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val capture: Boolean = false,
         val voice: Boolean = false,
         val callBoost: Boolean = false,
+        val folderId: Int = -1,
     ) {
+        /** 펼쳐진 폴더 안에 보이는 중이면 그 폴더 id (끌기 불가, 폴더 옆에 자동 배치) */
+        var inFolder: Int = -1
+        val isFolder: Boolean get() = folderId >= 0
+
+        /** 폴더에 담을 때 쓰는 버튼 식별 키 (폴더·통화증폭 버튼은 null) */
+        val key: String? get() = when {
+            isFolder || callBoost -> null
+            pee -> "pee"
+            capture -> "capture"
+            voice -> "voice"
+            restartPkg != null -> "rapp:$restartPkg"
+            restart -> "main"
+            launchPkg != null -> "sticker:$launchPkg"
+            else -> null
+        }
         lateinit var frame: FrameLayout
         lateinit var iv: ImageView
         var tv: TextView? = null
@@ -64,6 +80,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     private val bubbles = mutableListOf<Bubble>()
+    /** 지금 화면에 쓰는 폴더 목록(없어진 버튼은 뺀 것) / 펼쳐진 폴더 id (메모리에만 기억) */
+    private var folders: List<Folder> = emptyList()
+    private val expanded = mutableSetOf<Int>()
     private val rebuildForSize = Runnable { if (isRunning) buildAll() }
     private val peeHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val peeTick = object : Runnable {
@@ -174,7 +193,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 if (prefs.posX < 0) defaultPosition(b) else clampAndApply(b, prefs.posX, prefs.posY)
             }
             Prefs.KEY_STICKERS -> rebuildStickers()
-            Prefs.KEY_RESTART_APPS -> buildAll()
+            Prefs.KEY_RESTART_APPS, Prefs.KEY_FOLDERS -> buildAll()
             Prefs.KEY_LAB_PAUSE_LANDSCAPE -> buildAll()
             Prefs.KEY_PEE_ENABLED, Prefs.KEY_WATER_MODE, Prefs.KEY_SHOW_MAIN_RESTART,
             Prefs.KEY_CAPTURE_ENABLED, Prefs.KEY_VOICE_ENABLED -> buildAll()
@@ -238,7 +257,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             peeHandler.removeCallbacks(peeTick) // 알림은 그대로 둔다
             return
         }
+        refreshFolders()
         if (!waterOnly()) {
+            for (f in folders) addFolderBubble(f)
             if (prefs.showMainRestart) addRestartBubble()
             for (a in prefs.getRestartApps()) addRestartAppBubble(a)
             for (s in prefs.getStickers()) addStickerBubble(s)
@@ -247,12 +268,166 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         if (!waterOnly() && prefs.captureButtonEnabled) addCaptureBubble()
         if (!waterOnly() && prefs.voiceButtonEnabled) addVoiceBubble()
         if (callBubbleWanted()) addCallBubble()
+        layoutExpandedFolders()
         updatePeeState()
     }
 
     private fun rebuildStickers() {
         removeStickerBubbles()
         if (!waterOnly() && !floatingPaused()) for (s in prefs.getStickers()) addStickerBubble(s)
+        layoutExpandedFolders()
+    }
+
+    // ---------------- 폴더 ----------------
+
+    private fun validFolderKeys(): Set<String> = buildSet {
+        if (prefs.showMainRestart) add("main")
+        prefs.getRestartApps().forEach { add("rapp:${it.packageName}") }
+        prefs.getStickers().forEach { add("sticker:${it.packageName}") }
+        if (prefs.captureButtonEnabled) add("capture")
+        if (prefs.voiceButtonEnabled) add("voice")
+        if (Features.PEE && prefs.peeTrackerEnabled) add("pee")
+    }
+
+    /** 저장된 폴더에서 없어진 버튼을 뺀 목록을 만든다. (저장 정리는 잠시 뒤 따로 — 재구성 중 중첩 방지) */
+    private fun refreshFolders() {
+        val valid = validFolderKeys()
+        val raw = prefs.getFolders()
+        val cleaned = raw.map { f -> f.copy(members = f.members.filter { it in valid }) }
+            .filter { it.members.size >= 2 }
+        if (cleaned != raw) peeHandler.post { prefs.pruneFolders(validFolderKeys()) }
+        folders = if (waterOnly()) emptyList() else cleaned // 워터 모드에서는 폴더 무시
+        expanded.retainAll(folders.map { it.id }.toSet())
+    }
+
+    /** 닫힌 폴더 안에 들어 있어서 화면에 올리지 않는 버튼인지 */
+    private fun hiddenByFolder(key: String): Boolean =
+        folders.any { key in it.members && it.id !in expanded }
+
+    private fun defaultFolderPos(): Pair<Int, Int> = dp(12) to (screenSize().second * 0.5f).roundToInt()
+
+    private fun addFolderBubble(f: Folder) {
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(folderId = f.id)
+        b.iv = ImageView(this).apply {
+            setImageResource(R.drawable.ic_folder)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        val badge = (sizePx * 0.4f).toInt().coerceAtLeast(dp(12))
+        b.tv = TextView(this).apply {
+            text = f.members.size.toString()
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = (prefs.buttonSizeDp * 0.22f).coerceIn(6f, 12f)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xFF2F3A44.toInt())
+                setStroke(dp(1), 0xFFFFFFFF.toInt())
+            }
+        }
+        b.frame = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(FOLDER_COLOR)
+                setStroke(dp(2), 0xFFFFFFFF.toInt())
+            }
+            elevation = dp(6).toFloat()
+            addView(b.iv, FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER))
+            addView(b.tv, FrameLayout.LayoutParams(badge, badge, Gravity.BOTTOM or Gravity.END))
+        }
+        styleFolder(b)
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+        val (sx, sy) = savedPosOf(b)
+        val (cx, cy) = resolveCollision(b, sx, sy)
+        clampAndApply(b, cx, cy)
+    }
+
+    /** 펼쳐져 있으면 민트색, 닫혀 있으면 회청색 */
+    private fun styleFolder(b: Bubble) {
+        val c = if (b.folderId in expanded) ContextCompat.getColor(this, R.color.mint) else FOLDER_COLOR
+        (b.frame.background as? GradientDrawable)?.setColor(c)
+    }
+
+    private fun toggleFolder(id: Int) {
+        if (id in expanded) collapseFolder(id) else expandFolder(id)
+    }
+
+    private fun expandFolder(id: Int) {
+        val f = folders.firstOrNull { it.id == id } ?: return
+        expanded.add(id)
+        for (k in f.members) if (bubbles.none { it.key == k }) addBubbleByKey(k)
+        layoutFolder(f)
+        bubbles.firstOrNull { it.folderId == id }?.let { styleFolder(it) }
+        updatePeeState()
+    }
+
+    private fun collapseFolder(id: Int) {
+        val f = folders.firstOrNull { it.id == id } ?: return
+        expanded.remove(id)
+        val toRemove = bubbles.filter { b -> b.key?.let { it in f.members } == true }
+        for (b in toRemove) {
+            b.spinner?.cancel()
+            runCatching { wm.removeView(b.frame) }
+        }
+        bubbles.removeAll(toRemove.toSet())
+        bubbles.firstOrNull { it.folderId == id }?.let { styleFolder(it) }
+        updatePeeState()
+    }
+
+    private fun addBubbleByKey(key: String) {
+        when {
+            key == "main" -> if (prefs.showMainRestart) addRestartBubble()
+            key.startsWith("rapp:") ->
+                prefs.getRestartApps().firstOrNull { it.packageName == key.removePrefix("rapp:") }?.let { addRestartAppBubble(it) }
+            key.startsWith("sticker:") ->
+                prefs.getStickers().firstOrNull { it.packageName == key.removePrefix("sticker:") }?.let { addStickerBubble(it) }
+            key == "capture" -> addCaptureBubble()
+            key == "voice" -> addVoiceBubble()
+            key == "pee" -> addPeeBubble()
+        }
+    }
+
+    /** 펼친 폴더의 버튼들을 폴더 바로 아래(공간이 없으면 위)에 한 줄로 세운다. */
+    private fun layoutFolder(f: Folder) {
+        val fb = bubbles.firstOrNull { it.folderId == f.id } ?: return
+        val members = f.members.mapNotNull { k -> bubbles.firstOrNull { it.key == k } }
+        if (members.isEmpty()) return
+        val (_, h) = screenSize()
+        val size = fb.lp.width
+        val gap = dp(prefs.buttonGapDp).coerceAtLeast(dp(2))
+        val down = fb.lp.y + (members.size + 1) * (size + gap) - gap <= h
+        members.forEachIndexed { i, m ->
+            m.inFolder = f.id
+            val y = if (down) fb.lp.y + (i + 1) * (size + gap) else fb.lp.y - (i + 1) * (size + gap)
+            clampAndApply(m, fb.lp.x, y)
+        }
+    }
+
+    private fun layoutExpandedFolders() {
+        for (f in folders) if (f.id in expanded) layoutFolder(f)
+    }
+
+    /** 폴더를 없애고 버튼들을 폴더가 있던 자리에 차례로 내놓는다. */
+    private fun dissolveFolder(id: Int) {
+        val f = prefs.getFolders().firstOrNull { it.id == id } ?: return
+        val fb = bubbles.firstOrNull { it.folderId == id }
+        val (_, h) = screenSize()
+        val size = dp(prefs.buttonSizeDp)
+        val gap = dp(prefs.buttonGapDp).coerceAtLeast(dp(2))
+        val fx = fb?.lp?.x ?: dp(12)
+        val fy = fb?.lp?.y ?: dp(100)
+        val total = f.members.size * (size + gap) - gap
+        val startY = minOf(fy, h - total).coerceAtLeast(0)
+        expanded.remove(id)
+        f.members.forEachIndexed { i, k -> prefs.setSavedPosOfKey(k, fx, startY + i * (size + gap)) }
+        prefs.removeFolder(id) // 마지막에 지워서 한 번에 다시 그린다
+        toast("폴더를 풀었어요")
     }
 
     /** 실험실 설정이 켜져 있고 지금 가로모드면 플로팅 아이콘을 하나도 띄우지 않는다. */
@@ -277,6 +452,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     private fun addRestartBubble() {
+        if (hiddenByFolder("main")) return
         val sizePx = dp(prefs.buttonSizeDp)
         val b = Bubble(restart = true)
         b.iv = ImageView(this).apply {
@@ -304,6 +480,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun addStickerBubble(sticker: Sticker) {
         val pkg = sticker.packageName
+        if (hiddenByFolder("sticker:$pkg")) return
         val iconDrawable = try {
             packageManager.getApplicationIcon(pkg)
         } catch (e: Exception) {
@@ -339,6 +516,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     /** 특정 앱을 재시작하는 버튼 (앱 아이콘 + 재시작 뱃지) */
     private fun addRestartAppBubble(app: Sticker) {
         val pkg = app.packageName
+        if (hiddenByFolder("rapp:$pkg")) return
         val iconDrawable = try {
             packageManager.getApplicationIcon(pkg)
         } catch (e: Exception) {
@@ -387,7 +565,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     // ---------------- 화면 캡쳐 버튼 (실험실) ----------------
 
     private fun addCaptureBubble() {
-        if (bubbles.any { it.capture }) return
+        if (bubbles.any { it.capture } || hiddenByFolder("capture")) return
         val sizePx = dp(prefs.buttonSizeDp)
         val b = Bubble(capture = true)
         b.iv = ImageView(this).apply {
@@ -553,7 +731,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private var audioFocusRequest: android.media.AudioFocusRequest? = null
 
     private fun addVoiceBubble() {
-        if (bubbles.any { it.voice }) return
+        if (bubbles.any { it.voice } || hiddenByFolder("voice")) return
         val sizePx = dp(prefs.buttonSizeDp)
         val b = Bubble(voice = true)
         b.iv = ImageView(this).apply {
@@ -966,7 +1144,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     // ---------------- 워터 타이머 (개인 실험 기능) ----------------
 
     private fun addPeeBubble() {
-        if (bubbles.any { it.pee }) return
+        if (bubbles.any { it.pee } || hiddenByFolder("pee")) return
         val sizePx = dp(prefs.buttonSizeDp)
         val b = Bubble(pee = true)
         b.iv = ImageView(this).apply {
@@ -1151,7 +1329,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
         } else if (b.callBoost) {
             // 글자만 있는 버튼
-        } else if (b.capture || b.voice) {
+        } else if (b.capture || b.voice || b.isFolder) {
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER)
         } else {
             // 기본 재시작(배민)은 작은 아이콘, 앱 스티커/앱 재시작은 아이콘이 꽉 차게
@@ -1176,6 +1354,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     /** 각 버튼의 저장된 위치(없으면 기본 위치). */
     private fun savedPosOf(b: Bubble): Pair<Int, Int> {
         return when {
+            b.isFolder -> {
+                val f = prefs.getFolders().firstOrNull { it.id == b.folderId }
+                if (f == null || f.x < 0 || f.y < 0) defaultFolderPos() else f.x to f.y
+            }
             b.restartPkg != null -> {
                 val a = prefs.getRestartApps().firstOrNull { it.packageName == b.restartPkg }
                 if (a == null || a.x < 0 || a.y < 0) autoStickerPos(b) else a.x to a.y
@@ -1225,7 +1407,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             for (i in 1 until sorted.size) {
                 val prev = sorted[i - 1]
                 val cur = sorted[i]
-                if (origY[i] - origY[i - 1] <= attachTh) {
+                if (origY[i] - origY[i - 1] <= attachTh && cur.inFolder < 0) {
                     val ny = (prev.lp.y + size + newGap).coerceAtMost((h - size).coerceAtLeast(0))
                     clampAndApply(cur, cur.lp.x, ny)
                     savePositionAt(cur, cur.lp.x, cur.lp.y)
@@ -1243,6 +1425,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             clampAndApply(b, x, y)
             done.add(b)
         }
+        layoutExpandedFolders()
     }
 
     private fun autoStickerPos(b: Bubble): Pair<Int, Int> {
@@ -1280,9 +1463,20 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private var touchY = 0f
         private var dragging = false
         private var longPressFired = false
+        // 폴더는 보통 길게 누르기(0.6초)로는 반응만 하고, 더 길게(1.5초) 누르면 풀린다
+        private val folderDissolveRunnable = Runnable {
+            bubble.frame.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            dissolveFolder(bubble.folderId)
+        }
         private val longPressRunnable = Runnable {
             longPressFired = true
-            onLongPress(bubble)
+            if (bubble.isFolder) {
+                bubble.frame.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                bubble.frame.animate().scaleX(1.15f).scaleY(1.15f).setDuration(120).start() // 곧 풀린다는 표시
+                handler.postDelayed(folderDissolveRunnable, FOLDER_DISSOLVE_MS - LONG_PRESS_MS)
+            } else {
+                onLongPress(bubble)
+            }
         }
 
         override fun onTouch(v: View, e: MotionEvent): Boolean {
@@ -1306,12 +1500,16 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                         dragging = true
                         longPressFired = false
                         handler.removeCallbacks(longPressRunnable) // 움직이면 길게누르기 취소
+                        handler.removeCallbacks(folderDissolveRunnable)
                         v.alpha = 1f
                     }
-                    if (dragging) clampAndApply(bubble, startX + dx.roundToInt(), startY + dy.roundToInt())
+                    if (dragging && bubble.inFolder < 0) {
+                        clampAndApply(bubble, startX + dx.roundToInt(), startY + dy.roundToInt())
+                    }
                 }
                 MotionEvent.ACTION_UP -> {
                     handler.removeCallbacks(longPressRunnable)
+                    handler.removeCallbacks(folderDissolveRunnable)
                     v.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
                     when {
                         longPressFired -> {
@@ -1320,10 +1518,14 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                         }
                         dragging -> {
                             v.alpha = prefs.buttonAlpha / 100f
-                            val (sx, sy) = computeSnap(bubble)
-                            val (tx, ty) = resolveCollision(bubble, sx, sy)
-                            savePositionAt(bubble, tx, ty)
-                            animateTo(bubble, tx, ty)
+                            if (bubble.inFolder < 0) { // 폴더 안에 펼친 버튼은 옮기지 않는다
+                                val (sx, sy) = computeSnap(bubble)
+                                val (tx, ty) = resolveCollision(bubble, sx, sy)
+                                savePositionAt(bubble, tx, ty)
+                                animateTo(bubble, tx, ty)
+                                // 펼친 폴더를 옮겼으면 안의 버튼들도 새 자리 옆으로
+                                if (bubble.isFolder) peeHandler.postDelayed({ layoutExpandedFolders() }, 220L)
+                            }
                         }
                         else -> {
                             v.performClick()
@@ -1333,6 +1535,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     handler.removeCallbacks(longPressRunnable)
+                    handler.removeCallbacks(folderDissolveRunnable)
                     v.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
                     v.alpha = prefs.buttonAlpha / 100f
                 }
@@ -1349,6 +1552,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 updatePeeNotification()
             }
             b.callBoost -> onCallBubbleTapped() // 길게 눌러도 켜기/끄기 (지우지 않음)
+            b.isFolder -> {} // 폴더는 더 길게 눌러야 풀린다 (DragTouchListener 에서 처리)
             b.capture -> {
                 prefs.captureButtonEnabled = false
                 toast("화면 캡쳐 버튼을 지웠어요")
@@ -1371,6 +1575,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun savePositionAt(b: Bubble, x: Int, y: Int) {
         when {
+            b.isFolder -> prefs.updateFolderPosition(b.folderId, x, y)
             b.restartPkg != null -> prefs.updateRestartAppPosition(b.restartPkg, x, y)
             b.isRestart -> {
                 prefs.posX = x
@@ -1410,7 +1615,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val snapDist = size + dp(prefs.buttonSizeDp / 2)
 
         // 1) 다른 버튼 근처 → 세로로 붙이기
-        val near = bubbles.filter { it !== b }.minByOrNull {
+        val near = bubbles.filter { it !== b && !related(b, it) }.minByOrNull {
             abs(b.lp.x - it.lp.x) + abs(b.lp.y - it.lp.y)
         }
         if (near != null &&
@@ -1455,7 +1660,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     /** 주어진 위치가 다른 버튼과 겹치면, 겹치지 않는 가장 가까운 자리로(주로 위/아래로) 밀어낸다. */
     private fun resolveCollision(b: Bubble, x: Int, y: Int): Pair<Int, Int> =
-        resolveCollisionAgainst(b, x, y, bubbles.filter { it !== b })
+        resolveCollisionAgainst(b, x, y, bubbles.filter { it !== b && !related(b, it) })
+
+    /** 같은 폴더의 폴더 버튼과 그 안의 버튼들은 서로 붙어 있는 게 정상이라 겹침/스냅 계산에서 뺀다. */
+    private fun related(a: Bubble, b: Bubble): Boolean =
+        (a.isFolder && b.inFolder == a.folderId) || (b.isFolder && a.inFolder == b.folderId)
 
     private fun resolveCollisionAgainst(b: Bubble, x: Int, y: Int, others: List<Bubble>): Pair<Int, Int> {
         val (_, h) = screenSize()
@@ -1501,6 +1710,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     // ---------------- 탭 동작 ----------------
 
     private fun onBubbleTapped(b: Bubble) {
+        if (b.isFolder) {
+            toggleFolder(b.folderId)
+            return
+        }
         when {
             b.pee -> resetPee()
             b.capture -> captureScreen()
@@ -1509,6 +1722,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.isRestart -> onRestartTapped(b)
             else -> launchApp(b.launchPkg!!)
         }
+        // 폴더에서 꺼낸 버튼을 눌렀으면 폴더를 다시 닫는다 (음성 입력은 녹음 중이라 열어 둠)
+        if (b.inFolder >= 0 && !b.voice) collapseFolder(b.inFolder)
     }
 
     private fun openMainApp() {
@@ -1609,6 +1824,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val ACTION_PEE_RESET = "com.baeminrefresh.app.PEE_RESET"
         private const val ACTION_WATER_MODE = "com.baeminrefresh.app.WATER_MODE"
         private const val LONG_PRESS_MS = 600L
+        private const val FOLDER_DISSOLVE_MS = 1500L // 폴더는 이만큼 눌러야 풀린다
+        private val FOLDER_COLOR = 0xFF5B6770.toInt()
         private const val PEE_GOLD_MS = 3L * 60 * 60 * 1000 // 3시간
         private val PEE_COLOR_BLUE = 0xFF2AA7E0.toInt()
         private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
