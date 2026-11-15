@@ -51,6 +51,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val restartPkg: String? = null,
         val capture: Boolean = false,
         val voice: Boolean = false,
+        val callBoost: Boolean = false,
     ) {
         lateinit var frame: FrameLayout
         lateinit var iv: ImageView
@@ -245,6 +246,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         if (Features.PEE && prefs.peeTrackerEnabled) addPeeBubble()
         if (!waterOnly() && prefs.captureButtonEnabled) addCaptureBubble()
         if (!waterOnly() && prefs.voiceButtonEnabled) addVoiceBubble()
+        if (callBubbleWanted()) addCallBubble()
         updatePeeState()
     }
 
@@ -578,6 +580,75 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         else prefs.voicePosX to prefs.voicePosY
         val (cx, cy) = resolveCollision(b, desired.first, desired.second)
         clampAndApply(b, cx, cy)
+    }
+
+    // ---------------- 통화 증폭 버튼 (실험실, 통화 중에만 보임) ----------------
+
+    private fun callBubbleWanted(): Boolean =
+        prefs.callBoostEnabled && RestartAccessibilityService.instance?.callVolume?.inCall == true
+
+    /** 통화 시작/끝, 증폭 상태가 바뀌면 CallVolume 이 부른다 */
+    fun onCallBoostChanged() {
+        if (!isRunning) return
+        val want = callBubbleWanted() && !floatingPaused()
+        val b = bubbles.firstOrNull { it.callBoost }
+        if (want && b == null) addCallBubble()
+        else if (!want && b != null) {
+            runCatching { wm.removeView(b.frame) }
+            bubbles.remove(b)
+        } else if (b != null) styleCallBubble(b)
+    }
+
+    private fun addCallBubble() {
+        if (bubbles.any { it.callBoost }) return
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(callBoost = true)
+        b.iv = ImageView(this)
+        b.tv = TextView(this).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = (11f * prefs.buttonSizeDp / 40f).coerceIn(7f, 16f)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            maxLines = 1
+        }
+        b.frame = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setStroke(dp(2), 0xFFFFFFFF.toInt())
+            }
+            elevation = dp(6).toFloat()
+            addView(b.iv, FrameLayout.LayoutParams(1, 1, Gravity.CENTER))
+            addView(b.tv, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER
+            ))
+        }
+        styleCallBubble(b)
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+        val (cx, cy) = resolveCollision(b, savedPosOf(b).first, savedPosOf(b).second)
+        clampAndApply(b, cx, cy)
+    }
+
+    /** 색과 글자로 상태 표시: 회색=끔, 주황=확인 중, 초록=증폭 중, 빨강=켰지만 효과 확인 안 됨 */
+    private fun styleCallBubble(b: Bubble) {
+        val st = RestartAccessibilityService.instance?.callVolume?.status ?: CallVolume.Status.OFF
+        val (color, text) = when (st) {
+            CallVolume.Status.OFF -> 0xFF8A9099.toInt() to "끔"
+            CallVolume.Status.CHECKING -> 0xFFF0A020.toInt() to "증폭?"
+            CallVolume.Status.WORKING -> 0xFF22B36A.toInt() to "증폭"
+            CallVolume.Status.NOT_DETECTED -> 0xFFE0564B.toInt() to "증폭✕"
+        }
+        (b.frame.background as? GradientDrawable)?.setColor(color)
+        b.tv?.text = text
+    }
+
+    private fun onCallBubbleTapped() {
+        prefs.callBoostActive = !prefs.callBoostActive
+        RestartAccessibilityService.instance?.callVolume?.applyNow()
+        toast(if (prefs.callBoostActive) "통화 증폭 켰어요" else "통화 증폭 껐어요")
     }
 
     private fun onVoiceTapped() {
@@ -1078,6 +1149,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx / 2, sizePx / 2, Gravity.CENTER or Gravity.TOP).apply {
                 topMargin = dp(5)
             }
+        } else if (b.callBoost) {
+            // 글자만 있는 버튼
         } else if (b.capture || b.voice) {
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER)
         } else {
@@ -1111,6 +1184,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 if (prefs.posX < 0 || prefs.posY < 0) defaultRestartPos() else prefs.posX to prefs.posY
             b.pee ->
                 if (prefs.peePosX < 0 || prefs.peePosY < 0) defaultPeePos() else prefs.peePosX to prefs.peePosY
+            b.callBoost -> {
+                val (w, h) = screenSize()
+                if (prefs.callPosX < 0 || prefs.callPosY < 0) (w - dp(prefs.buttonSizeDp) - dp(12)) to (h * 0.3f).roundToInt()
+                else prefs.callPosX to prefs.callPosY
+            }
             b.capture -> {
                 val (_, h) = screenSize()
                 if (prefs.capturePosX < 0 || prefs.capturePosY < 0) dp(12) to (h * 0.45f).roundToInt()
@@ -1270,6 +1348,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 prefs.waterModeEnabled = !prefs.waterModeEnabled
                 updatePeeNotification()
             }
+            b.callBoost -> onCallBubbleTapped() // 길게 눌러도 켜기/끄기 (지우지 않음)
             b.capture -> {
                 prefs.captureButtonEnabled = false
                 toast("화면 캡쳐 버튼을 지웠어요")
@@ -1308,6 +1387,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.voice -> {
                 prefs.voicePosX = x
                 prefs.voicePosY = y
+            }
+            b.callBoost -> {
+                prefs.callPosX = x
+                prefs.callPosY = y
             }
             else -> b.launchPkg?.let { prefs.updateStickerPosition(it, x, y) }
         }
@@ -1422,6 +1505,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.pee -> resetPee()
             b.capture -> captureScreen()
             b.voice -> onVoiceTapped()
+            b.callBoost -> onCallBubbleTapped()
             b.isRestart -> onRestartTapped(b)
             else -> launchApp(b.launchPkg!!)
         }

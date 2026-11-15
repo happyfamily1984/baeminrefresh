@@ -633,7 +633,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="📞 통화 소리 조절·증폭"
+                                android:text="📞 통화 소리 증폭"
                                 android:textColor="@color/text_main"
                                 android:textSize="16sp"
                                 android:textStyle="bold" />
@@ -643,7 +643,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
                                 android:lineSpacingExtra="2dp"
-                                android:text="통화가 시작되면 통화 소리를 정한 크기로 맞춰요. 100% 넘게 올리면 통화 중에만 소리를 증폭해요(최대 약 2배). 기기에 따라 일반 전화는 증폭이 안 될 수 있어요. (접근성 필요)"
+                                android:text="통화 중에만 '증폭' 버튼이 떠요. 누르면 켜고/꺼요. 초록=증폭 중, 주황=확인 중, 빨강=켰지만 효과 확인 안 됨, 회색=꺼짐. 켜면 통화 음량 최대 + 삼성 통화화면 '추가 음량' 자동 켜기 + 소리 증폭기를 함께 써요. (접근성 필요)"
                                 android:textColor="@color/text_sub"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -668,7 +668,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:max="200" />
+                        android:max="100" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

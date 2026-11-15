@@ -57,10 +57,23 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_CALL_BOOST, false)
         set(value) = sp.edit().putBoolean(KEY_CALL_BOOST, value).apply()
 
-    /** 0~200 (%) — 100 초과는 증폭 */
-    var callVolumePct: Int
-        get() = sp.getInt(KEY_CALL_PCT, 100)
-        set(value) = sp.edit().putInt(KEY_CALL_PCT, value).apply()
+    /** 통화 중 증폭 켜짐/꺼짐 (통화 중 뜨는 버튼으로 바꿈) */
+    var callBoostActive: Boolean
+        get() = sp.getBoolean(KEY_CALL_ACTIVE, true)
+        set(value) = sp.edit().putBoolean(KEY_CALL_ACTIVE, value).apply()
+
+    /** 증폭 세기 0~100 */
+    var callBoostLevel: Int
+        get() = sp.getInt(KEY_CALL_LEVEL, 60)
+        set(value) = sp.edit().putInt(KEY_CALL_LEVEL, value).apply()
+
+    var callPosX: Int
+        get() = sp.getInt(KEY_CALL_X, -1)
+        set(value) = sp.edit().putInt(KEY_CALL_X, value).apply()
+
+    var callPosY: Int
+        get() = sp.getInt(KEY_CALL_Y, -1)
+        set(value) = sp.edit().putInt(KEY_CALL_Y, value).apply()
 
     var buttonSizeDp: Int
         get() = sp.getInt(KEY_SIZE, DEFAULT_SIZE_DP)
@@ -243,7 +256,10 @@ class Prefs(context: Context) {
         const val KEY_ENABLED = "floating_enabled"
         const val KEY_SIZE = "button_size_dp"
         const val KEY_CALL_BOOST = "lab_call_boost"
-        const val KEY_CALL_PCT = "lab_call_pct"
+        const val KEY_CALL_ACTIVE = "lab_call_active"
+        const val KEY_CALL_LEVEL = "lab_call_level"
+        const val KEY_CALL_X = "call_pos_x"
+        const val KEY_CALL_Y = "call_pos_y"
         const val KEY_KAKAO_DISMISS = "lab_kakao_dismiss"
         const val KEY_KAKAO_SECONDS = "lab_kakao_seconds"
         const val KEY_KAKAO_PKG = "lab_kakao_pkg"

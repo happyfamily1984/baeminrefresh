@@ -50,6 +50,36 @@ class RestartAccessibilityService : AccessibilityService() {
 
     val callVolume by lazy { CallVolume(this) }
 
+    /**
+     * 삼성 통화 화면의 '추가 음량(Extra volume)' 버튼을 켜거나 끈다. 통화 화면이 보일 때만 가능.
+     * @return 원하는 상태로 만들었으면 true
+     */
+    fun setSamsungExtraVolume(on: Boolean): Boolean {
+        val labels = listOf("추가음량", "추가볼륨", "음량높이기", "볼륨높이기", "음량키우기", "extravolume")
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        runCatching { for (w in windows) w.root?.let { roots.add(it) } }
+        for (r in roots) {
+            val pkg = r.packageName?.toString() ?: continue
+            if (!pkg.contains("incallui") && !pkg.contains("dialer") && !pkg.contains("telecom")) continue
+            val node = findNode(r) { n ->
+                val t = listOfNotNull(n.text, n.contentDescription).joinToString(" ")
+                    .replace(" ", "").lowercase()
+                n.isVisibleToUser && labels.any { t.contains(it) }
+            } ?: continue
+            // 켜짐 상태를 알 수 있으면 다를 때만 누른다
+            var target: AccessibilityNodeInfo? = node
+            var depth = 0
+            while (target != null && !target.isClickable && depth < 4) { target = target.parent; depth++ }
+            val t = target ?: return false
+            val stateKnown = t.isCheckable || node.isCheckable
+            val isOn = t.isChecked || node.isChecked || t.isSelected || node.isSelected
+            if (stateKnown && isOn == on) return true
+            if (!stateKnown && !on) return t.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            return t.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
+        return false
+    }
+
     override fun onDestroy() {
         callVolume.stop()
         if (instance === this) instance = null
