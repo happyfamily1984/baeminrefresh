@@ -52,6 +52,16 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_KAKAO_PKG, null)
         set(value) = sp.edit().putString(KEY_KAKAO_PKG, value).apply()
 
+    /** 실험실: 통화 소리 조절/증폭 */
+    var callBoostEnabled: Boolean
+        get() = sp.getBoolean(KEY_CALL_BOOST, false)
+        set(value) = sp.edit().putBoolean(KEY_CALL_BOOST, value).apply()
+
+    /** 0~200 (%) — 100 초과는 증폭 */
+    var callVolumePct: Int
+        get() = sp.getInt(KEY_CALL_PCT, 100)
+        set(value) = sp.edit().putInt(KEY_CALL_PCT, value).apply()
+
     var buttonSizeDp: Int
         get() = sp.getInt(KEY_SIZE, DEFAULT_SIZE_DP)
         set(value) = sp.edit().putInt(KEY_SIZE, value).apply()
@@ -232,6 +242,8 @@ class Prefs(context: Context) {
         const val KEY_TARGET = "target_package"
         const val KEY_ENABLED = "floating_enabled"
         const val KEY_SIZE = "button_size_dp"
+        const val KEY_CALL_BOOST = "lab_call_boost"
+        const val KEY_CALL_PCT = "lab_call_pct"
         const val KEY_KAKAO_DISMISS = "lab_kakao_dismiss"
         const val KEY_KAKAO_SECONDS = "lab_kakao_seconds"
         const val KEY_KAKAO_PKG = "lab_kakao_pkg"

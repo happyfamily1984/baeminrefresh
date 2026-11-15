@@ -105,6 +105,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         setupKakaoDismiss()
+        setupCallBoost()
 
         if (Features.PEE) {
             findViewById<View>(R.id.pee_card).visibility = View.VISIBLE
@@ -738,6 +739,36 @@ class MainActivity : AppCompatActivity() {
         })
         findViewById<MaterialButton>(R.id.kakao_app_button).setOnClickListener { showKakaoAppPicker() }
         updateKakaoAppButton()
+    }
+
+    private fun setupCallBoost() {
+        val sw = findViewById<MaterialSwitch>(R.id.call_boost_switch)
+        sw.isChecked = prefs.callBoostEnabled
+        sw.setOnCheckedChangeListener { _, checked ->
+            prefs.callBoostEnabled = checked
+            RestartAccessibilityService.instance?.callVolume?.applyNow()
+            if (checked && RestartAccessibilityService.instance == null) {
+                Toast.makeText(this, "접근성에서 '배민리프레시'를 켜야 동작해요", Toast.LENGTH_LONG).show()
+            }
+        }
+        val label = findViewById<TextView>(R.id.call_volume_label)
+        val seek = findViewById<SeekBar>(R.id.call_volume_seek)
+        seek.max = CallVolume.MAX_PCT
+        seek.progress = prefs.callVolumePct
+        label.text = callVolumeText(prefs.callVolumePct)
+        seek.setOnSeekBarChangeListener(SeekListener { p ->
+            prefs.callVolumePct = p
+            label.text = callVolumeText(p)
+            RestartAccessibilityService.instance?.callVolume?.applyNow()
+        })
+    }
+
+    private fun callVolumeText(p: Int): String = when {
+        p > 100 -> {
+            val warn = if (CallVolume.boostWorks == false) " — 이 기기는 증폭이 안 돼요" else ""
+            "통화 소리: $p% (증폭)$warn"
+        }
+        else -> "통화 소리: $p%"
     }
 
     private fun kakaoPackageOrDetect(): String? =

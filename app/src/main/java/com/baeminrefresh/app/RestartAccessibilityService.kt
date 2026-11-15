@@ -43,11 +43,15 @@ class RestartAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        callVolume.start() // 실험실: 통화 소리 조절 (꺼져 있으면 아무것도 안 함)
         // 접근성이 연결되면, 떠 있는 플로팅 버튼을 접근성 오버레이로 다시 올려 통화 화면에서도 보이게
         FloatingService.instance?.refreshOverlayType()
     }
 
+    val callVolume by lazy { CallVolume(this) }
+
     override fun onDestroy() {
+        callVolume.stop()
         if (instance === this) instance = null
         FloatingService.instance?.refreshOverlayType()
         handler.removeCallbacksAndMessages(null)
