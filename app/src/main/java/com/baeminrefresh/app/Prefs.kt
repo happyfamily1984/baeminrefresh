@@ -145,6 +145,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_VOICE_ENABLED, false)
         set(value) = sp.edit().putBoolean(KEY_VOICE_ENABLED, value).apply()
 
+    /** 음성 인식: 인터넷 없이(기기 안에서) 인식하는 쪽을 먼저 쓴다 → 연결 끊김·지연 줄이기 */
+    var voiceOffline: Boolean
+        get() = sp.getBoolean(KEY_VOICE_OFFLINE, false)
+        set(value) = sp.edit().putBoolean(KEY_VOICE_OFFLINE, value).apply()
+
     var voicePosX: Int
         get() = sp.getInt(KEY_VOICE_X, -1)
         set(value) = sp.edit().putInt(KEY_VOICE_X, value).apply()
@@ -287,6 +292,14 @@ class Prefs(context: Context) {
         setFolders(list + Folder(id, x, y, members))
     }
 
+    fun setFolderMembers(id: Int, members: List<String>) {
+        setFolders(getFolders().map { if (it.id == id) it.copy(members = members) else it })
+    }
+
+    fun addToFolder(id: Int, keys: List<String>) {
+        setFolders(getFolders().map { if (it.id == id) it.copy(members = (it.members + keys).distinct()) else it })
+    }
+
     fun removeFolder(id: Int) {
         setFolders(getFolders().filterNot { it.id == id })
     }
@@ -336,6 +349,7 @@ class Prefs(context: Context) {
         const val KEY_ENABLED = "floating_enabled"
         const val KEY_SIZE = "button_size_dp"
         const val KEY_FOLDERS = "folders"
+        const val KEY_VOICE_OFFLINE = "voice_offline"
         const val KEY_CALL_BOOST = "lab_call_boost"
         const val KEY_CALL_ACTIVE = "lab_call_active"
         const val KEY_CALL_LEVEL = "lab_call_level"

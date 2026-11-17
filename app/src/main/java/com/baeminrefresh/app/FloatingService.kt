@@ -401,11 +401,43 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val (_, h) = screenSize()
         val size = fb.lp.width
         val gap = dp(prefs.buttonGapDp).coerceAtLeast(dp(2))
-        val down = fb.lp.y + (members.size + 1) * (size + gap) - gap <= h
+        val down = folderStacksDown(fb, members.size)
         members.forEachIndexed { i, m ->
             m.inFolder = f.id
             val y = if (down) fb.lp.y + (i + 1) * (size + gap) else fb.lp.y - (i + 1) * (size + gap)
             clampAndApply(m, fb.lp.x, y)
+        }
+    }
+
+    /** 폴더 아래로 펼칠 자리가 있으면 true, 없으면 위로 펼친다. */
+    private fun folderStacksDown(fb: Bubble, count: Int): Boolean {
+        val (_, h) = screenSize()
+        val size = fb.lp.width
+        val gap = dp(prefs.buttonGapDp).coerceAtLeast(dp(2))
+        return fb.lp.y + (count + 1) * (size + gap) - gap <= h
+    }
+
+    /** 펼친 폴더 안에서 버튼을 위아래로 끌어 놓았을 때: 놓은 높이 순서대로 폴더 안 순서를 바꾼다. */
+    private fun reorderFolderMember(b: Bubble) {
+        val f = folders.firstOrNull { it.id == b.inFolder } ?: return
+        val fb = bubbles.firstOrNull { it.folderId == f.id } ?: return
+        val shown = f.members.mapNotNull { k -> bubbles.firstOrNull { it.key == k } }
+        val byY = shown.sortedBy { it.lp.y }.let { if (folderStacksDown(fb, shown.size)) it else it.reversed() }
+        val newOrder = byY.mapNotNull { it.key }
+        val order = newOrder + f.members.filter { it !in newOrder }
+        if (order != f.members) prefs.setFolderMembers(f.id, order) // 저장되면 다시 그려지며 새 순서로 정렬
+        else layoutFolder(f) // 순서가 그대로면 제자리로
+    }
+
+    /** 폴더를 두 번 누르면: 이 폴더에 넣을 앱 스티커를 고르는 창을 띄운다. */
+    private fun onFolderDoubleTap(id: Int) {
+        val intent = Intent(this, FolderPickerActivity::class.java)
+            .putExtra(FolderPickerActivity.EXTRA_FOLDER_ID, id)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            toast("앱 고르는 창을 열지 못했어요")
         }
     }
 
@@ -683,6 +715,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private var voiceSession = false
     private var voiceEmptyStreak = 0
     private var voiceFailStreak = 0
+    /** 인식 중간 결과(아직 확정 전). 인식기가 확정 결과 없이 끊겨도 말한 내용을 살리려고 쓴다. */
+    private var voicePartial = ""
     /** 녹음한 말을 모아 두었다가, 다시 누르면 한 번에 입력한다 (중간중간 끊겨 들어가는 것 방지) */
     private val voiceBuffer = mutableListOf<String>()
     /** 안드로이드 13+ 연속 인식(구간 나눔 없이 길게 듣기) 지원 여부: null=아직 모름 */
@@ -915,6 +949,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
             )
             putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+            putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            if (prefs.voiceOffline) putExtra(android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            if (Build.VERSION.SDK_INT >= 33) {
+                // 배달에서 자주 나오는 말은 더 잘 알아듣게 힌트를 준다
+                putStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_BIASING_STRINGS, VOICE_HINTS)
+            }
             // 말 사이 쉬는 시간을 넉넉히 (지원하는 인식기에서만 적용됨)
             putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 5000L)
             putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 5000L)
@@ -930,6 +971,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
         }
         voiceSessionReady = false
+        voicePartial = ""
         return try {
             recognizer?.startListening(intent)
             listening = true
@@ -957,6 +999,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         peeHandler.removeCallbacks(voiceFlushFallback)
         if (!voiceSession) return // 이미 입력하고 끝난 세션
         voiceSession = false
+        takePartial()
         val text = voiceBuffer.joinToString(" ").trim()
         voiceBuffer.clear()
         endVoiceSession()
@@ -972,9 +1015,30 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
+    /** 확정 결과 후보 중 신뢰도가 가장 높은 것을 고른다 (신뢰도 정보가 없으면 첫 번째). */
+    private fun bestVoiceText(bundle: android.os.Bundle?): String? {
+        val list = bundle?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION) ?: return null
+        val scores = bundle.getFloatArray(android.speech.SpeechRecognizer.CONFIDENCE_SCORES)
+        val i = if (scores != null && scores.size == list.size && scores.any { it > 0f }) {
+            scores.indices.maxByOrNull { scores[it] } ?: 0
+        } else 0
+        return list.getOrNull(i)?.trim()
+    }
+
+    /** 확정 결과 없이 끊겼을 때: 마지막 중간 결과라도 모아 둔다. */
+    private fun takePartial() {
+        val p = voicePartial.trim()
+        voicePartial = ""
+        if (p.isNotEmpty()) {
+            voiceBuffer.add(p)
+            voiceEmptyStreak = 0
+            lastVoiceActivity = System.currentTimeMillis()
+        }
+    }
+
     private fun addVoiceText(bundle: android.os.Bundle?) {
-        val t = bundle?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
-            ?.firstOrNull()?.trim()
+        val t = bestVoiceText(bundle)
+        voicePartial = ""
         if (!t.isNullOrEmpty()) {
             voiceBuffer.add(t)
             voiceEmptyStreak = 0
@@ -1060,7 +1124,12 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         override fun onResults(results: android.os.Bundle) {
             listening = false
             val before = voiceBuffer.size
+            val partial = voicePartial
             addVoiceText(results)
+            if (voiceBuffer.size == before) { // 확정 결과가 비었으면 중간 결과로 대신
+                voicePartial = partial
+                takePartial()
+            }
             if (voiceBuffer.size == before) voiceEmptyStreak++
             if (voiceWanted) continueOrEnd() else flushVoice()
         }
@@ -1078,6 +1147,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
         override fun onError(error: Int) {
             listening = false
+            takePartial() // 확정 결과 없이 끊겨도 말한 내용은 살린다
             // 연속 인식을 이 기기 인식기가 지원하지 않음 → 기존 방식으로 바로 다시
             if (usingSegmented && !voiceSessionReady && segmentedOk == null && voiceWanted) {
                 segmentedOk = false
@@ -1137,7 +1207,14 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             // 구간이 끝나도 사용자가 멈추기 전까지는 빨강 유지 (곧 다시 듣는다)
         }
 
-        override fun onPartialResults(partialResults: android.os.Bundle?) {}
+        override fun onPartialResults(partialResults: android.os.Bundle?) {
+            val t = partialResults?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull()?.trim()
+            if (!t.isNullOrEmpty()) {
+                voicePartial = t
+                lastVoiceActivity = System.currentTimeMillis()
+            }
+        }
         override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
     }
 
@@ -1463,6 +1540,25 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private var touchY = 0f
         private var dragging = false
         private var longPressFired = false
+        private var pendingTap: Runnable? = null
+
+        /** 폴더는 한 번 누르면 펼침/닫기(잠깐 기다려 더블탭인지 확인), 두 번 누르면 앱 추가 창 */
+        private fun handleFolderTap() {
+            val p = pendingTap
+            if (p != null) {
+                handler.removeCallbacks(p)
+                pendingTap = null
+                onFolderDoubleTap(bubble.folderId)
+                return
+            }
+            val r = Runnable {
+                pendingTap = null
+                onBubbleTapped(bubble)
+            }
+            pendingTap = r
+            handler.postDelayed(r, DOUBLE_TAP_MS)
+        }
+
         // 폴더는 보통 길게 누르기(0.6초)로는 반응만 하고, 더 길게(1.5초) 누르면 풀린다
         private val folderDissolveRunnable = Runnable {
             bubble.frame.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
@@ -1503,8 +1599,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                         handler.removeCallbacks(folderDissolveRunnable)
                         v.alpha = 1f
                     }
-                    if (dragging && bubble.inFolder < 0) {
-                        clampAndApply(bubble, startX + dx.roundToInt(), startY + dy.roundToInt())
+                    if (dragging) {
+                        if (bubble.inFolder < 0) clampAndApply(bubble, startX + dx.roundToInt(), startY + dy.roundToInt())
+                        else clampAndApply(bubble, startX, startY + dy.roundToInt()) // 폴더 안: 위아래로만 (순서 바꾸기)
                     }
                 }
                 MotionEvent.ACTION_UP -> {
@@ -1518,7 +1615,9 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                         }
                         dragging -> {
                             v.alpha = prefs.buttonAlpha / 100f
-                            if (bubble.inFolder < 0) { // 폴더 안에 펼친 버튼은 옮기지 않는다
+                            if (bubble.inFolder >= 0) {
+                                reorderFolderMember(bubble) // 폴더 안에서는 위치 대신 순서만 바꾼다
+                            } else {
                                 val (sx, sy) = computeSnap(bubble)
                                 val (tx, ty) = resolveCollision(bubble, sx, sy)
                                 savePositionAt(bubble, tx, ty)
@@ -1529,7 +1628,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                         }
                         else -> {
                             v.performClick()
-                            onBubbleTapped(bubble)
+                            if (bubble.isFolder) handleFolderTap() else onBubbleTapped(bubble)
                         }
                     }
                 }
@@ -1825,11 +1924,16 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val ACTION_WATER_MODE = "com.baeminrefresh.app.WATER_MODE"
         private const val LONG_PRESS_MS = 600L
         private const val FOLDER_DISSOLVE_MS = 1500L // 폴더는 이만큼 눌러야 풀린다
+        private const val DOUBLE_TAP_MS = 280L // 이 안에 한 번 더 누르면 더블탭
         private val FOLDER_COLOR = 0xFF5B6770.toInt()
         private const val PEE_GOLD_MS = 3L * 60 * 60 * 1000 // 3시간
         private val PEE_COLOR_BLUE = 0xFF2AA7E0.toInt()
         private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
         private val VOICE_COLOR = 0xFF5C6BC0.toInt() // 평소: 인디고
+        private val VOICE_HINTS = arrayListOf(
+            "배민", "배민커넥트", "쿠팡이츠", "카카오 T 픽커", "픽업", "배달", "배달 완료", "주문",
+            "고객님", "문 앞", "공동현관", "비밀번호", "도착", "출발", "수락", "거절"
+        )
         private const val VOICE_MAX_FAIL = 4 // 오류 시 자동 재시도 횟수
         private val BEEP_STREAMS = intArrayOf(
             android.media.AudioManager.STREAM_MUSIC,

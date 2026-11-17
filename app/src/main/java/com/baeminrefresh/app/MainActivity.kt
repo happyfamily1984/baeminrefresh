@@ -105,6 +105,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        val voiceOfflineSwitch = findViewById<MaterialSwitch>(R.id.voice_offline_switch)
+        voiceOfflineSwitch.isChecked = prefs.voiceOffline
+        voiceOfflineSwitch.setOnCheckedChangeListener { _, checked -> prefs.voiceOffline = checked }
+
         setupKakaoDismiss()
         setupCallBoost()
 

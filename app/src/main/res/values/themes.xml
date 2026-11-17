@@ -7,4 +7,12 @@
         <item name="android:statusBarColor">@color/mint_dark</item>
         <item name="android:windowBackground">@color/bg</item>
     </style>
+
+    <!-- 다른 앱 위에 투명하게 뜨는 선택 창용 -->
+    <style name="Theme.BaeminRefresh.Translucent" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/mint</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>
