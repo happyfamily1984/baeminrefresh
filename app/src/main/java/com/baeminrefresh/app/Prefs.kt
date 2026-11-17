@@ -150,6 +150,40 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_VOICE_OFFLINE, false)
         set(value) = sp.edit().putBoolean(KEY_VOICE_OFFLINE, value).apply()
 
+    // ---------------- 폰 최적화 (실험실) ----------------
+
+    /** 켜면 플로팅 최적화 버튼이 뜬다 */
+    var optimizeEnabled: Boolean
+        get() = sp.getBoolean(KEY_OPT_ENABLED, false)
+        set(value) = sp.edit().putBoolean(KEY_OPT_ENABLED, value).apply()
+
+    /** 강제 중지로 깊게 정리 (접근성 필요) */
+    var optimizeDeep: Boolean
+        get() = sp.getBoolean(KEY_OPT_DEEP, true)
+        set(value) = sp.edit().putBoolean(KEY_OPT_DEEP, value).apply()
+
+    /** 최적화할 때 알림창의 알림도 모두 지우기 */
+    var optimizeClearNotif: Boolean
+        get() = sp.getBoolean(KEY_OPT_NOTIF, true)
+        set(value) = sp.edit().putBoolean(KEY_OPT_NOTIF, value).apply()
+
+    var optPosX: Int
+        get() = sp.getInt(KEY_OPT_X, -1)
+        set(value) = sp.edit().putInt(KEY_OPT_X, value).apply()
+
+    var optPosY: Int
+        get() = sp.getInt(KEY_OPT_Y, -1)
+        set(value) = sp.edit().putInt(KEY_OPT_Y, value).apply()
+
+    /** 기본 보호 목록에 더한 앱 / 뺀 앱 (패키지 이름) */
+    var optProtectAdd: Set<String>
+        get() = sp.getStringSet(KEY_OPT_ADD, emptySet())?.toSet() ?: emptySet()
+        set(value) = sp.edit().putStringSet(KEY_OPT_ADD, HashSet(value)).apply()
+
+    var optProtectRemove: Set<String>
+        get() = sp.getStringSet(KEY_OPT_REMOVE, emptySet())?.toSet() ?: emptySet()
+        set(value) = sp.edit().putStringSet(KEY_OPT_REMOVE, HashSet(value)).apply()
+
     var voicePosX: Int
         get() = sp.getInt(KEY_VOICE_X, -1)
         set(value) = sp.edit().putInt(KEY_VOICE_X, value).apply()
@@ -320,6 +354,7 @@ class Prefs(context: Context) {
         key == "capture" -> capturePosX to capturePosY
         key == "voice" -> voicePosX to voicePosY
         key == "pee" -> peePosX to peePosY
+        key == "optimize" -> optPosX to optPosY
         key.startsWith("rapp:") -> getRestartApps().firstOrNull { it.packageName == key.removePrefix("rapp:") }
             ?.let { it.x to it.y } ?: (-1 to -1)
         key.startsWith("sticker:") -> getStickers().firstOrNull { it.packageName == key.removePrefix("sticker:") }
@@ -333,6 +368,7 @@ class Prefs(context: Context) {
             key == "capture" -> { capturePosX = x; capturePosY = y }
             key == "voice" -> { voicePosX = x; voicePosY = y }
             key == "pee" -> { peePosX = x; peePosY = y }
+            key == "optimize" -> { optPosX = x; optPosY = y }
             key.startsWith("rapp:") -> updateRestartAppPosition(key.removePrefix("rapp:"), x, y)
             key.startsWith("sticker:") -> updateStickerPosition(key.removePrefix("sticker:"), x, y)
         }
@@ -349,6 +385,13 @@ class Prefs(context: Context) {
         const val KEY_ENABLED = "floating_enabled"
         const val KEY_SIZE = "button_size_dp"
         const val KEY_FOLDERS = "folders"
+        const val KEY_OPT_ENABLED = "lab_opt_enabled"
+        const val KEY_OPT_DEEP = "lab_opt_deep"
+        const val KEY_OPT_NOTIF = "lab_opt_notif"
+        const val KEY_OPT_X = "opt_pos_x"
+        const val KEY_OPT_Y = "opt_pos_y"
+        const val KEY_OPT_ADD = "opt_protect_add"
+        const val KEY_OPT_REMOVE = "opt_protect_remove"
         const val KEY_VOICE_OFFLINE = "voice_offline"
         const val KEY_CALL_BOOST = "lab_call_boost"
         const val KEY_CALL_ACTIVE = "lab_call_active"

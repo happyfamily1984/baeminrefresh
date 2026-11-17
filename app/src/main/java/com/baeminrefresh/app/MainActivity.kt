@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -111,6 +112,7 @@ class MainActivity : AppCompatActivity() {
 
         setupKakaoDismiss()
         setupCallBoost()
+        setupOptimizer()
 
         if (Features.PEE) {
             findViewById<View>(R.id.pee_card).visibility = View.VISIBLE
@@ -147,6 +149,13 @@ class MainActivity : AppCompatActivity() {
         refresh()
         renderStickers()
         renderRestartApps()
+        PhoneOptimizer.addListener(optimizerListener)
+        refreshOptimizer()
+    }
+
+    override fun onPause() {
+        PhoneOptimizer.removeListener(optimizerListener)
+        super.onPause()
     }
 
     // ---------------- 앱 스티커 ----------------
@@ -733,6 +742,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (prefs.captureButtonEnabled) items += "capture" to "화면 캡쳐"
         if (prefs.voiceButtonEnabled) items += "voice" to "음성 입력"
+        if (prefs.optimizeEnabled) items += "optimize" to "폰 최적화"
         if (Features.PEE && prefs.peeTrackerEnabled) items += "pee" to "워터 타이머"
         val avail = items.filter { it.first !in inFolder }
         if (avail.size < 2) {
@@ -781,6 +791,108 @@ class MainActivity : AppCompatActivity() {
         })
         findViewById<MaterialButton>(R.id.kakao_app_button).setOnClickListener { showKakaoAppPicker() }
         updateKakaoAppButton()
+    }
+
+    // ---------------- 폰 최적화 (실험실) ----------------
+
+    private val optimizerListener = object : PhoneOptimizer.Listener {
+        override fun onProgress(done: Int, total: Int) = refreshOptimizer()
+        override fun onFinished() = refreshOptimizer()
+    }
+
+    private fun setupOptimizer() {
+        val sw = findViewById<MaterialSwitch>(R.id.opt_switch)
+        sw.isChecked = prefs.optimizeEnabled
+        sw.setOnCheckedChangeListener { _, checked ->
+            prefs.optimizeEnabled = checked
+            if (checked && !FloatingService.isRunning) {
+                Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 ⚡버튼이 나타나요", Toast.LENGTH_LONG).show()
+            }
+        }
+        val deep = findViewById<MaterialSwitch>(R.id.opt_deep_switch)
+        deep.isChecked = prefs.optimizeDeep
+        deep.setOnCheckedChangeListener { _, checked ->
+            prefs.optimizeDeep = checked
+            if (checked && RestartAccessibilityService.instance == null) {
+                Toast.makeText(this, "접근성에서 '배민리프레시'를 켜야 깊게 정리해요", Toast.LENGTH_LONG).show()
+            }
+        }
+        val notif = findViewById<MaterialSwitch>(R.id.opt_notif_switch)
+        notif.isChecked = prefs.optimizeClearNotif
+        notif.setOnCheckedChangeListener { _, checked -> prefs.optimizeClearNotif = checked }
+
+        findViewById<MaterialButton>(R.id.opt_run_button).setOnClickListener {
+            if (PhoneOptimizer.running) {
+                PhoneOptimizer.cancel()
+                return@setOnClickListener
+            }
+            if (prefs.optimizeDeep && RestartAccessibilityService.instance == null) {
+                Toast.makeText(this, "접근성을 켜면 깊게 정리해요. 지금은 가볍게만 정리할게요", Toast.LENGTH_LONG).show()
+            }
+            PhoneOptimizer.start(this, prefs.optimizeDeep)
+            refreshOptimizer()
+        }
+        findViewById<MaterialButton>(R.id.opt_reboot_button).setOnClickListener {
+            val svc = RestartAccessibilityService.instance
+            if (svc == null) {
+                Toast.makeText(this, "접근성에서 '배민리프레시'를 켜 주세요", Toast.LENGTH_LONG).show()
+            } else {
+                svc.openPowerMenu()
+            }
+        }
+        findViewById<MaterialButton>(R.id.opt_clear_notif_button).setOnClickListener {
+            PhoneOptimizer.clearNotificationsOnly(this)
+        }
+        findViewById<MaterialButton>(R.id.opt_notif_perm_button).setOnClickListener {
+            safeStart(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+        findViewById<MaterialButton>(R.id.opt_usage_button).setOnClickListener {
+            val withPkg = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:$packageName"))
+            if (!safeStart(withPkg, showError = false)) safeStart(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        }
+        findViewById<MaterialButton>(R.id.opt_protect_button).setOnClickListener { showProtectEditor() }
+    }
+
+    private fun refreshOptimizer() {
+        if (isFinishing) return
+        findViewById<TextView>(R.id.opt_status).text = PhoneOptimizer.statusText(this)
+        findViewById<MaterialButton>(R.id.opt_run_button).text =
+            if (PhoneOptimizer.running) {
+                if (PhoneOptimizer.totalCount > 0) "멈추기 (${PhoneOptimizer.doneCount}/${PhoneOptimizer.totalCount})" else "멈추기"
+            } else "지금 최적화"
+        val usageOk = PhoneOptimizer.isUsageAccessGranted(this)
+        findViewById<MaterialButton>(R.id.opt_usage_button).text =
+            if (usageOk) "사용 기록 접근: 켜짐 ✓ (최근 쓴 앱만 골라요)" else "사용 기록 접근 허용 (최근 쓴 앱만 골라 더 빨라져요)"
+        val notifOk = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
+        findViewById<MaterialButton>(R.id.opt_notif_perm_button).text =
+            if (notifOk) "알림 접근: 켜짐 ✓" else "알림 접근 허용 (알림을 바로 지워요)"
+    }
+
+    /** 보호할 앱을 고른다. 기본 보호 앱에서 더하거나 빼면 그 차이만 저장한다. */
+    private fun showProtectEditor() {
+        val defaults = PhoneOptimizer.keywordDefaults(this)
+        val effective = PhoneOptimizer.effectiveProtected(this)
+        val apps = TargetApps.launchableApps(this)
+            .sortedWith(compareByDescending<AppEntry> { it.packageName in effective }.thenBy { it.label })
+        val checked = BooleanArray(apps.size) { apps[it].packageName in effective }
+        AlertDialog.Builder(this)
+            .setTitle("정리하지 않을 앱 (체크 = 보호)")
+            .setMultiChoiceItems(apps.map { it.label }.toTypedArray(), checked) { _, i, c -> checked[i] = c }
+            .setPositiveButton("저장") { _, _ ->
+                val shown = apps.map { it.packageName }.toSet()
+                val add = prefs.optProtectAdd.filterNot { it in shown }.toMutableSet()
+                val remove = prefs.optProtectRemove.filterNot { it in shown }.toMutableSet()
+                apps.forEachIndexed { i, a ->
+                    val inDefault = a.packageName in defaults
+                    if (checked[i] && !inDefault) add += a.packageName
+                    if (!checked[i] && inDefault) remove += a.packageName
+                }
+                prefs.optProtectAdd = add
+                prefs.optProtectRemove = remove
+                Toast.makeText(this, "보호 목록을 저장했어요", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun setupCallBoost() {

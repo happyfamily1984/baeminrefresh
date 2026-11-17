@@ -462,8 +462,19 @@ class RestartAccessibilityService : AccessibilityService() {
     val isBusy: Boolean get() = state != State.IDLE
 
     /** @return 시작했으면 true, 이미 진행 중이면 false */
-    fun restart(pkg: String, onDone: (Result) -> Unit): Boolean {
+    fun restart(pkg: String, onDone: (Result) -> Unit): Boolean = begin(pkg, onDone, relaunch = true)
+
+    /**
+     * 강제 중지만 하고 다시 실행하지는 않는다 (폰 최적화용).
+     * 결과: RESTARTED = 종료함, NOT_RUNNING_LAUNCHED = 이미 꺼져 있었음, 그 외 = 실패
+     */
+    fun forceStopOnly(pkg: String, onDone: (Result) -> Unit): Boolean = begin(pkg, onDone, relaunch = false)
+
+    private var relaunchAfter = true
+
+    private fun begin(pkg: String, onDone: (Result) -> Unit, relaunch: Boolean): Boolean {
         if (isBusy) return false
+        relaunchAfter = relaunch
         targetPkg = pkg
         callback = onDone
         startedAt = SystemClock.uptimeMillis()
@@ -535,7 +546,7 @@ class RestartAccessibilityService : AccessibilityService() {
         val pkg = targetPkg
         val cb = callback
         callback = null
-        if (!launch || pkg == null) {
+        if (!launch || !relaunchAfter || pkg == null) {
             setState(State.IDLE)
             cb?.invoke(result)
             return
@@ -546,6 +557,77 @@ class RestartAccessibilityService : AccessibilityService() {
             setState(State.IDLE)
             cb?.invoke(if (launched) result else Result.FAILED)
         }, LAUNCH_DELAY_MS)
+    }
+
+    // ---------------- 폰 최적화 도우미 ----------------
+
+    /** 지금 화면에 떠 있는 앱의 패키지 (모르면 null) */
+    fun currentForegroundPackage(): String? =
+        runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+
+    /** 이전에 쓰던 앱으로 돌아간다 (앱 상태는 그대로, 새로 시작하지 않음) */
+    fun resumeApp(pkg: String): Boolean {
+        val intent = packageManager.getLaunchIntentForPackage(pkg) ?: return false
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        return try {
+            startActivity(intent)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun goHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
+
+    /** 전원 메뉴(끄기/다시 시작)를 연다. 재시작은 직접 눌러야 한다. */
+    fun openPowerMenu(): Boolean = performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
+
+    /**
+     * 알림 접근 허용이 없을 때의 대체 방법: 알림창을 내려서 '모두 지우기' 버튼을 누른다.
+     * 기기마다 버튼 이름이 달라 안 될 수도 있다.
+     */
+    fun clearNotificationsViaShade(onDone: (Boolean) -> Unit) {
+        if (!performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)) {
+            onDone(false)
+            return
+        }
+        val labels = listOf("모두지우기", "모두삭제", "알림모두삭제", "알림모두지우기", "clearall")
+        var tries = 0
+        val r = object : Runnable {
+            override fun run() {
+                tries++
+                var clicked = false
+                runCatching {
+                    for (w in windows) {
+                        val root = w.root ?: continue
+                        val node = findNode(root) { n ->
+                            val t = listOfNotNull(n.text, n.contentDescription).joinToString("")
+                                .replace(" ", "").lowercase()
+                            n.isVisibleToUser && labels.any { t == it || t.contains(it) }
+                        }
+                        if (node != null && clickNodeOrParent(node)) {
+                            clicked = true
+                            break
+                        }
+                        // 알림이 많으면 버튼이 목록 맨 아래에 있으니 내려 본다
+                        if (tries % 2 == 0) findNode(root) { it.isScrollable }
+                            ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    }
+                }
+                if (clicked) {
+                    handler.postDelayed({
+                        performGlobalAction(GLOBAL_ACTION_BACK)
+                        onDone(true)
+                    }, 500L)
+                } else if (tries < 8) {
+                    handler.postDelayed(this, 500L)
+                } else {
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    onDone(false)
+                }
+            }
+        }
+        handler.postDelayed(r, 800L)
     }
 
     private fun launchApp(pkg: String): Boolean {

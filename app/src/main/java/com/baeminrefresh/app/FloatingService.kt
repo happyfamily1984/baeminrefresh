@@ -53,6 +53,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val voice: Boolean = false,
         val callBoost: Boolean = false,
         val folderId: Int = -1,
+        val optimize: Boolean = false,
     ) {
         /** 펼쳐진 폴더 안에 보이는 중이면 그 폴더 id (끌기 불가, 폴더 옆에 자동 배치) */
         var inFolder: Int = -1
@@ -64,6 +65,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             pee -> "pee"
             capture -> "capture"
             voice -> "voice"
+            optimize -> "optimize"
             restartPkg != null -> "rapp:$restartPkg"
             restart -> "main"
             launchPkg != null -> "sticker:$launchPkg"
@@ -108,6 +110,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
         buildAll()
         prefs.registerListener(this)
+        PhoneOptimizer.addListener(optimizeListener)
         isRunning = true
     }
 
@@ -158,6 +161,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         isRunning = false
         if (instance === this) instance = null
         prefs.unregisterListener(this)
+        PhoneOptimizer.removeListener(optimizeListener)
         peeHandler.removeCallbacks(peeTick)
         cancelPeeNotification()
         voiceWanted = false
@@ -193,7 +197,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 if (prefs.posX < 0) defaultPosition(b) else clampAndApply(b, prefs.posX, prefs.posY)
             }
             Prefs.KEY_STICKERS -> rebuildStickers()
-            Prefs.KEY_RESTART_APPS, Prefs.KEY_FOLDERS -> buildAll()
+            Prefs.KEY_RESTART_APPS, Prefs.KEY_FOLDERS, Prefs.KEY_OPT_ENABLED -> buildAll()
             Prefs.KEY_LAB_PAUSE_LANDSCAPE -> buildAll()
             Prefs.KEY_PEE_ENABLED, Prefs.KEY_WATER_MODE, Prefs.KEY_SHOW_MAIN_RESTART,
             Prefs.KEY_CAPTURE_ENABLED, Prefs.KEY_VOICE_ENABLED -> buildAll()
@@ -267,6 +271,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         if (Features.PEE && prefs.peeTrackerEnabled) addPeeBubble()
         if (!waterOnly() && prefs.captureButtonEnabled) addCaptureBubble()
         if (!waterOnly() && prefs.voiceButtonEnabled) addVoiceBubble()
+        if (!waterOnly() && prefs.optimizeEnabled) addOptimizeBubble()
         if (callBubbleWanted()) addCallBubble()
         layoutExpandedFolders()
         updatePeeState()
@@ -278,6 +283,76 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         layoutExpandedFolders()
     }
 
+    // ---------------- 폰 최적화 버튼 (실험실) ----------------
+
+    private val optimizeListener = object : PhoneOptimizer.Listener {
+        override fun onProgress(done: Int, total: Int) = styleOptimize()
+        override fun onFinished() = styleOptimize()
+    }
+
+    private fun addOptimizeBubble() {
+        if (bubbles.any { it.optimize } || hiddenByFolder("optimize")) return
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(optimize = true)
+        b.iv = ImageView(this).apply {
+            setImageResource(R.drawable.ic_bolt)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        b.tv = TextView(this).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = (prefs.buttonSizeDp * 0.27f).coerceIn(7f, 14f)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            maxLines = 1
+        }
+        b.frame = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(OPT_COLOR)
+                setStroke(dp(2), 0xFFFFFFFF.toInt())
+            }
+            elevation = dp(6).toFloat()
+            addView(b.iv, FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER))
+            addView(b.tv, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER
+            ))
+        }
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+        styleOptimize()
+        val (sx, sy) = savedPosOf(b)
+        val (cx, cy) = resolveCollision(b, sx, sy)
+        clampAndApply(b, cx, cy)
+    }
+
+    /** 평소 주황, 실행 중이면 파랑 + 진행 숫자(n/m) */
+    private fun styleOptimize() {
+        val b = bubbles.firstOrNull { it.optimize } ?: return
+        val running = PhoneOptimizer.running
+        (b.frame.background as? GradientDrawable)?.setColor(if (running) OPT_RUNNING_COLOR else OPT_COLOR)
+        val label = if (!running) "" else if (PhoneOptimizer.totalCount > 0) "${PhoneOptimizer.doneCount}/${PhoneOptimizer.totalCount}" else "…"
+        b.tv?.text = label
+        b.iv.visibility = if (label.isEmpty()) View.VISIBLE else View.INVISIBLE
+    }
+
+    private fun onOptimizeTapped() {
+        if (PhoneOptimizer.running) {
+            PhoneOptimizer.cancel()
+            toast("최적화를 멈출게요")
+            return
+        }
+        if (prefs.optimizeDeep && RestartAccessibilityService.instance == null) {
+            toast("접근성을 켜면 깊게 정리해요. 지금은 가볍게만 정리할게요")
+        } else {
+            toast("최적화를 시작해요")
+        }
+        PhoneOptimizer.start(this, prefs.optimizeDeep)
+        styleOptimize()
+    }
+
     // ---------------- 폴더 ----------------
 
     private fun validFolderKeys(): Set<String> = buildSet {
@@ -286,6 +361,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         prefs.getStickers().forEach { add("sticker:${it.packageName}") }
         if (prefs.captureButtonEnabled) add("capture")
         if (prefs.voiceButtonEnabled) add("voice")
+        if (prefs.optimizeEnabled) add("optimize")
         if (Features.PEE && prefs.peeTrackerEnabled) add("pee")
     }
 
@@ -389,6 +465,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 prefs.getStickers().firstOrNull { it.packageName == key.removePrefix("sticker:") }?.let { addStickerBubble(it) }
             key == "capture" -> addCaptureBubble()
             key == "voice" -> addVoiceBubble()
+            key == "optimize" -> addOptimizeBubble()
             key == "pee" -> addPeeBubble()
         }
     }
@@ -1406,7 +1483,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
         } else if (b.callBoost) {
             // 글자만 있는 버튼
-        } else if (b.capture || b.voice || b.isFolder) {
+        } else if (b.capture || b.voice || b.isFolder || b.optimize) {
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER)
         } else {
             // 기본 재시작(배민)은 작은 아이콘, 앱 스티커/앱 재시작은 아이콘이 꽉 차게
@@ -1447,6 +1524,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 val (w, h) = screenSize()
                 if (prefs.callPosX < 0 || prefs.callPosY < 0) (w - dp(prefs.buttonSizeDp) - dp(12)) to (h * 0.3f).roundToInt()
                 else prefs.callPosX to prefs.callPosY
+            }
+            b.optimize -> {
+                val (_, h) = screenSize()
+                if (prefs.optPosX < 0 || prefs.optPosY < 0) dp(12) to (h * 0.6f).roundToInt()
+                else prefs.optPosX to prefs.optPosY
             }
             b.capture -> {
                 val (_, h) = screenSize()
@@ -1652,6 +1734,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
             b.callBoost -> onCallBubbleTapped() // 길게 눌러도 켜기/끄기 (지우지 않음)
             b.isFolder -> {} // 폴더는 더 길게 눌러야 풀린다 (DragTouchListener 에서 처리)
+            b.optimize -> {
+                prefs.optimizeEnabled = false
+                toast("폰 최적화 버튼을 지웠어요")
+            }
             b.capture -> {
                 prefs.captureButtonEnabled = false
                 toast("화면 캡쳐 버튼을 지웠어요")
@@ -1675,6 +1761,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun savePositionAt(b: Bubble, x: Int, y: Int) {
         when {
             b.isFolder -> prefs.updateFolderPosition(b.folderId, x, y)
+            b.optimize -> {
+                prefs.optPosX = x
+                prefs.optPosY = y
+            }
             b.restartPkg != null -> prefs.updateRestartAppPosition(b.restartPkg, x, y)
             b.isRestart -> {
                 prefs.posX = x
@@ -1818,6 +1908,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.capture -> captureScreen()
             b.voice -> onVoiceTapped()
             b.callBoost -> onCallBubbleTapped()
+            b.optimize -> onOptimizeTapped()
             b.isRestart -> onRestartTapped(b)
             else -> launchApp(b.launchPkg!!)
         }
@@ -1926,6 +2017,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val FOLDER_DISSOLVE_MS = 1500L // 폴더는 이만큼 눌러야 풀린다
         private const val DOUBLE_TAP_MS = 280L // 이 안에 한 번 더 누르면 더블탭
         private val FOLDER_COLOR = 0xFF5B6770.toInt()
+        private val OPT_COLOR = 0xFFF59E0B.toInt()
+        private val OPT_RUNNING_COLOR = 0xFF2F80ED.toInt()
         private const val PEE_GOLD_MS = 3L * 60 * 60 * 1000 // 3시간
         private val PEE_COLOR_BLUE = 0xFF2AA7E0.toInt()
         private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
