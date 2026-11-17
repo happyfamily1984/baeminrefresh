@@ -58,6 +58,11 @@ object PhoneOptimizer {
     var totalCount = 0
         private set
     private var cancelled = false
+
+    /** 마지막 최적화가 끝까지 끝났는지 (플로팅 버튼을 파랗게 표시). 새로 시작하거나 멈추면 false */
+    @Volatile
+    var lastCompleted = false
+        private set
     private val handler = Handler(Looper.getMainLooper())
 
     /** 기본 보호 앱: 앱 이름에 이 글자가 들어 있으면 보호 (공백 없이, 소문자) */
@@ -220,6 +225,7 @@ object PhoneOptimizer {
         val svc = RestartAccessibilityService.instance
         running = true
         cancelled = false
+        lastCompleted = false
         doneCount = 0
         totalCount = 0
 
@@ -252,6 +258,7 @@ object PhoneOptimizer {
             if (!plan.usageKnown) lines += "사용 기록 접근을 허용하면 더 빨라요"
             if (uptimeDays() >= REBOOT_ADVICE_DAYS) lines += "재부팅한 지 ${uptimeDays()}일 — 재부팅을 권해요"
             Toast.makeText(app, lines.joinToString("\n"), Toast.LENGTH_LONG).show()
+            lastCompleted = !cancelled
             running = false
             notifyFinished()
         }

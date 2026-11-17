@@ -328,11 +328,17 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         clampAndApply(b, cx, cy)
     }
 
-    /** 평소 주황, 실행 중이면 파랑 + 진행 숫자(n/m) */
+    /** 평소 주황 → 진행 중 노랑 + 진행 숫자(n/m) → 다 끝나면 파랑 (다음에 시작할 때까지 유지) */
     private fun styleOptimize() {
         val b = bubbles.firstOrNull { it.optimize } ?: return
         val running = PhoneOptimizer.running
-        (b.frame.background as? GradientDrawable)?.setColor(if (running) OPT_RUNNING_COLOR else OPT_COLOR)
+        val color = when {
+            running -> OPT_RUNNING_COLOR
+            PhoneOptimizer.lastCompleted -> OPT_DONE_COLOR
+            else -> OPT_COLOR
+        }
+        (b.frame.background as? GradientDrawable)?.setColor(color)
+        b.tv?.setTextColor(0xFF3A3000.toInt()) // 노랑 위에서 잘 보이게 진한 글자
         val label = if (!running) "" else if (PhoneOptimizer.totalCount > 0) "${PhoneOptimizer.doneCount}/${PhoneOptimizer.totalCount}" else "…"
         b.tv?.text = label
         b.iv.visibility = if (label.isEmpty()) View.VISIBLE else View.INVISIBLE
@@ -2018,7 +2024,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val DOUBLE_TAP_MS = 280L // 이 안에 한 번 더 누르면 더블탭
         private val FOLDER_COLOR = 0xFF5B6770.toInt()
         private val OPT_COLOR = 0xFFF59E0B.toInt()
-        private val OPT_RUNNING_COLOR = 0xFF2F80ED.toInt()
+        private val OPT_RUNNING_COLOR = 0xFFFFD60A.toInt() // 진행 중: 노랑
+        private val OPT_DONE_COLOR = 0xFF2F80ED.toInt() // 완료: 파랑
         private const val PEE_GOLD_MS = 3L * 60 * 60 * 1000 // 3시간
         private val PEE_COLOR_BLUE = 0xFF2AA7E0.toInt()
         private val PEE_COLOR_GOLD = 0xFFE6A700.toInt()
