@@ -311,19 +311,21 @@ object PhoneOptimizer {
     }
 
     /**
-     * 알림창의 알림을 모두 지운다.
-     * 알림 접근이 허용돼 있으면 바로 지우고, 아니면 접근성으로 알림창을 내려 '모두 지우기'를 누른다.
+     * 알림창의 알림을 모두 지운다. 접근성으로 알림창을 내려 '모두 지우기'를 누른다.
+     * (알림 설정은 건드리지 않고, 지금 떠 있는 알림만 지운다)
      * @param onDone (결과 문구, 알림창을 직접 열었는지)
      */
     fun clearNotifications(ctx: Context, svc: RestartAccessibilityService?, onDone: (String, Boolean) -> Unit) {
-        if (NotificationCleaner.clearAll()) {
-            onDone("알림창 알림 모두 지움", false)
-        } else if (svc != null) {
-            svc.clearNotificationsViaShade { ok ->
-                onDone(if (ok) "알림창 알림 모두 지움" else "알림 지우기 실패 (알림 접근을 허용해 보세요)", true)
-            }
-        } else {
-            onDone("알림 접근을 허용하면 알림도 지워요", false)
+        if (svc == null) {
+            onDone("접근성을 켜면 알림도 지워요", false)
+            return
+        }
+        svc.clearNotificationsViaShade { ok, hint ->
+            onDone(
+                if (ok) "알림창 알림 모두 지움"
+                else "알림 지우기 실패 (알림이 없거나 '모두 지우기' 버튼을 못 찾았어요)" + if (hint.isNotEmpty()) "\n$hint" else "",
+                true
+            )
         }
     }
 

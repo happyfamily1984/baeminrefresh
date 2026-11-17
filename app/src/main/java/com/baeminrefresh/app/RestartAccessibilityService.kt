@@ -583,51 +583,113 @@ class RestartAccessibilityService : AccessibilityService() {
     fun openPowerMenu(): Boolean = performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
 
     /**
-     * 알림 접근 허용이 없을 때의 대체 방법: 알림창을 내려서 '모두 지우기' 버튼을 누른다.
-     * 기기마다 버튼 이름이 달라 안 될 수도 있다.
+     * 알림창을 내려서 '모두 지우기' 버튼을 접근성으로 누른다.
+     * 버튼은 id/글자로 찾고, 눌러지지 않으면 그 자리를 직접 탭한다. 안 보이면 알림 목록을 내려가며 찾는다.
+     * @param onDone (성공 여부, 실패했을 때 화면에서 본 글자들 — 원인 파악용)
      */
-    fun clearNotificationsViaShade(onDone: (Boolean) -> Unit) {
+    fun clearNotificationsViaShade(onDone: (Boolean, String) -> Unit) {
         if (!performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)) {
-            onDone(false)
+            onDone(false, "알림창을 열지 못했어요")
             return
         }
-        val labels = listOf("모두지우기", "모두삭제", "알림모두삭제", "알림모두지우기", "clearall")
         var tries = 0
+        var clicks = 0
         val r = object : Runnable {
             override fun run() {
                 tries++
-                var clicked = false
-                runCatching {
-                    for (w in windows) {
-                        val root = w.root ?: continue
-                        val node = findNode(root) { n ->
-                            val t = listOfNotNull(n.text, n.contentDescription).joinToString("")
-                                .replace(" ", "").lowercase()
-                            n.isVisibleToUser && labels.any { t == it || t.contains(it) }
-                        }
-                        if (node != null && clickNodeOrParent(node)) {
-                            clicked = true
-                            break
-                        }
-                        // 알림이 많으면 버튼이 목록 맨 아래에 있으니 내려 본다
-                        if (tries % 2 == 0) findNode(root) { it.isScrollable }
-                            ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                val roots = shadeRoots()
+                val node = roots.firstNotNullOfOrNull { root -> findNode(root) { isClearAllNode(it) } }
+                if (node != null) {
+                    if (clicks >= 3) { // 눌러도 계속 남아 있음
+                        finishShade(false, onDone)
+                        return
                     }
+                    clicks++
+                    var ok = clickNodeOrParent(node)
+                    if (!ok) {
+                        val b = Rect().also { node.getBoundsInScreen(it) }
+                        if (!b.isEmpty) {
+                            tap(b.exactCenterX(), b.exactCenterY())
+                            ok = true
+                        }
+                    }
+                    // 누른 뒤 버튼이 사라졌는지 확인하러 다시 온다
+                    handler.postDelayed(this, 900L)
+                    return
                 }
-                if (clicked) {
-                    handler.postDelayed({
-                        performGlobalAction(GLOBAL_ACTION_BACK)
-                        onDone(true)
-                    }, 500L)
-                } else if (tries < 8) {
-                    handler.postDelayed(this, 500L)
-                } else {
-                    performGlobalAction(GLOBAL_ACTION_BACK)
-                    onDone(false)
+                if (clicks > 0) { // 눌렀고 버튼이 사라짐 = 성공
+                    finishShade(true, onDone)
+                    return
                 }
+                if (tries >= 18) {
+                    val seen = shadeTexts(roots)
+                    finishShade(false, onDone, "화면에서 찾은 글자: $seen")
+                    return
+                }
+                // 아직 안 보임: 알림창이 열리는 중이거나, 알림이 많아서 버튼이 아래에 있음
+                if (tries >= 4 && tries % 3 == 1) scrollShadeDown(roots)
+                handler.postDelayed(this, 450L)
             }
         }
-        handler.postDelayed(r, 800L)
+        handler.postDelayed(r, 900L)
+    }
+
+    private fun finishShade(ok: Boolean, onDone: (Boolean, String) -> Unit, hint: String = "") {
+        performGlobalAction(GLOBAL_ACTION_BACK) // 알림창 닫기
+        onDone(ok, hint)
+    }
+
+    /** 알림창을 그리는 시스템 화면(systemui)의 창들 */
+    private fun shadeRoots(): List<AccessibilityNodeInfo> {
+        val out = mutableListOf<AccessibilityNodeInfo>()
+        runCatching {
+            for (w in windows) {
+                val r = w.root ?: continue
+                if (r.packageName?.toString() == "com.android.systemui") out.add(r)
+            }
+        }
+        return out
+    }
+
+    private fun isClearAllNode(n: AccessibilityNodeInfo): Boolean {
+        if (!n.isVisibleToUser) return false
+        val id = n.viewIdResourceName?.lowercase() ?: ""
+        if (id.contains("clear_all") || id.contains("clearall") || id.contains("dismiss_all")) return true
+        val t = listOfNotNull(n.text, n.contentDescription).joinToString("").replace(" ", "").lowercase()
+        if (t.isEmpty() || t.length > 12) return false // 긴 글자는 알림 내용이라 제외
+        return t.contains("모두지우기") || t.contains("모두삭제") || t.contains("전체삭제") ||
+            t.contains("clearall") || t.contains("dismissall")
+    }
+
+    private fun shadeTexts(roots: List<AccessibilityNodeInfo>): String {
+        val seen = LinkedHashSet<String>()
+        for (r in roots) forEachNode(r) { n ->
+            val t = listOfNotNull(n.text, n.contentDescription).joinToString("").trim()
+            if (t.isNotEmpty() && t.length <= 12 && n.isVisibleToUser && (n.isClickable || n.isLongClickable)) seen += t
+        }
+        return if (seen.isEmpty()) "없음" else seen.take(10).joinToString(", ")
+    }
+
+    private fun scrollShadeDown(roots: List<AccessibilityNodeInfo>) {
+        val scrolled = roots.any { r ->
+            findNode(r) { it.isScrollable && it.isVisibleToUser }
+                ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) == true
+        }
+        if (!scrolled) { // 스크롤 정보를 못 주는 화면이면 직접 위로 쓸어 올린다
+            val dm = resources.displayMetrics
+            swipe(dm.widthPixels / 2f, dm.heightPixels * 0.70f, dm.heightPixels * 0.30f)
+        }
+    }
+
+    private fun swipe(x: Float, y1: Float, y2: Float) {
+        val path = android.graphics.Path().apply {
+            moveTo(x, y1)
+            lineTo(x, y2)
+        }
+        val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 250)
+        runCatching {
+            dispatchGesture(android.accessibilityservice.GestureDescription.Builder().addStroke(stroke).build(), null, null)
+        }
     }
 
     private fun launchApp(pkg: String): Boolean {

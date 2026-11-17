@@ -46,17 +46,6 @@
         android:theme="@style/Theme.BaeminRefresh"
         tools:targetApi="35">
 
-        <!-- 폰 최적화: 알림창 한 번에 지우기 (알림 접근 허용 시) -->
-        <service
-            android:name=".NotificationCleaner"
-            android:exported="true"
-            android:label="@string/app_name"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-
         <activity
             android:name=".FolderPickerActivity"
             android:excludeFromRecents="true"

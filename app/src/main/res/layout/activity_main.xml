@@ -899,12 +899,6 @@
                         android:text="알림만 지우기" />
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/opt_notif_perm_button"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/opt_usage_button"
                         style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="wrap_content"

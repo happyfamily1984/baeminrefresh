@@ -19,7 +19,6 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -843,9 +842,6 @@ class MainActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.opt_clear_notif_button).setOnClickListener {
             PhoneOptimizer.clearNotificationsOnly(this)
         }
-        findViewById<MaterialButton>(R.id.opt_notif_perm_button).setOnClickListener {
-            safeStart(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-        }
         findViewById<MaterialButton>(R.id.opt_usage_button).setOnClickListener {
             val withPkg = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:$packageName"))
             if (!safeStart(withPkg, showError = false)) safeStart(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
@@ -863,9 +859,6 @@ class MainActivity : AppCompatActivity() {
         val usageOk = PhoneOptimizer.isUsageAccessGranted(this)
         findViewById<MaterialButton>(R.id.opt_usage_button).text =
             if (usageOk) "사용 기록 접근: 켜짐 ✓ (최근 쓴 앱만 골라요)" else "사용 기록 접근 허용 (최근 쓴 앱만 골라 더 빨라져요)"
-        val notifOk = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
-        findViewById<MaterialButton>(R.id.opt_notif_perm_button).text =
-            if (notifOk) "알림 접근: 켜짐 ✓" else "알림 접근 허용 (알림을 바로 지워요)"
     }
 
     /** 보호할 앱을 고른다. 기본 보호 앱에서 더하거나 빼면 그 차이만 저장한다. */
