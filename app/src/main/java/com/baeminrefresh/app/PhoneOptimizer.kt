@@ -95,6 +95,7 @@ object PhoneOptimizer {
         (prefs.kakaoPackage ?: runCatching { TargetApps.detectKakaoQuick(ctx)?.packageName }.getOrNull())?.let { s += it }
         prefs.getStickers().forEach { s += it.packageName }
         prefs.getRestartApps().forEach { s += it.packageName }
+        if (prefs.diaryEnabled) s += DiaryLink.PKG // 일기장 버튼의 녹음을 맡은 앱
         runCatching { ctx.getSystemService(TelecomManager::class.java)?.defaultDialerPackage }.getOrNull()?.let { s += it }
         runCatching { Telephony.Sms.getDefaultSmsPackage(ctx) }.getOrNull()?.let { s += it }
         runCatching {

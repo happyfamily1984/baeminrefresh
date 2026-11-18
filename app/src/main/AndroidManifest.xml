@@ -35,6 +35,8 @@
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+        <!-- 일기장 앱 연결 (실험실: 일기장 쓰기) -->
+        <package android:name="io.github.happyfamily1984.diary" />
     </queries>
 
     <application

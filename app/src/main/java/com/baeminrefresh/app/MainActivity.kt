@@ -112,6 +112,7 @@ class MainActivity : AppCompatActivity() {
         setupKakaoDismiss()
         setupCallBoost()
         setupOptimizer()
+        setupDiary()
 
         if (Features.PEE) {
             findViewById<View>(R.id.pee_card).visibility = View.VISIBLE
@@ -742,6 +743,10 @@ class MainActivity : AppCompatActivity() {
         if (prefs.captureButtonEnabled) items += "capture" to "화면 캡쳐"
         if (prefs.voiceButtonEnabled) items += "voice" to "음성 입력"
         if (prefs.optimizeEnabled) items += "optimize" to "폰 최적화"
+        if (prefs.diaryEnabled) {
+            items += DiaryLink.KIND_DIARY to "📖 일기 쓰기"
+            items += DiaryLink.KIND_IDEA to "💡 아이디어 쓰기"
+        }
         if (Features.PEE && prefs.peeTrackerEnabled) items += "pee" to "워터 타이머"
         val avail = items.filter { it.first !in inFolder }
         if (avail.size < 2) {
@@ -797,6 +802,22 @@ class MainActivity : AppCompatActivity() {
     private val optimizerListener = object : PhoneOptimizer.Listener {
         override fun onProgress(done: Int, total: Int) = refreshOptimizer()
         override fun onFinished() = refreshOptimizer()
+    }
+
+    private fun setupDiary() {
+        val sw = findViewById<MaterialSwitch>(R.id.diary_switch)
+        sw.isChecked = prefs.diaryEnabled
+        sw.setOnCheckedChangeListener { _, checked ->
+            if (checked && !DiaryLink.isInstalled(this)) {
+                Toast.makeText(this, "일기장 앱이 설치되어 있지 않아요. 먼저 일기장 앱을 설치해 주세요", Toast.LENGTH_LONG).show()
+                sw.isChecked = false
+                return@setOnCheckedChangeListener
+            }
+            prefs.diaryEnabled = checked
+            if (checked && !FloatingService.isRunning) {
+                Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 📖 · 💡 버튼이 나타나요", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun setupOptimizer() {

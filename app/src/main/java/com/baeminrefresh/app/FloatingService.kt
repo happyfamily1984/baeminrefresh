@@ -54,6 +54,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val callBoost: Boolean = false,
         val folderId: Int = -1,
         val optimize: Boolean = false,
+        /** 일기장 버튼: "diary"(📖 일기) 또는 "idea"(💡 아이디어) */
+        val diary: String? = null,
     ) {
         /** 펼쳐진 폴더 안에 보이는 중이면 그 폴더 id (끌기 불가, 폴더 옆에 자동 배치) */
         var inFolder: Int = -1
@@ -66,6 +68,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             capture -> "capture"
             voice -> "voice"
             optimize -> "optimize"
+            diary != null -> diary
             restartPkg != null -> "rapp:$restartPkg"
             restart -> "main"
             launchPkg != null -> "sticker:$launchPkg"
@@ -111,6 +114,12 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         buildAll()
         prefs.registerListener(this)
         PhoneOptimizer.addListener(optimizeListener)
+        ContextCompat.registerReceiver(
+            this, diaryStateReceiver, android.content.IntentFilter(DiaryLink.STATE_ACTION),
+            ContextCompat.RECEIVER_EXPORTED
+        )
+        diaryReceiverOn = true
+        if (prefs.diaryEnabled) diaryAttach(true)
         isRunning = true
     }
 
@@ -162,6 +171,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         if (instance === this) instance = null
         prefs.unregisterListener(this)
         PhoneOptimizer.removeListener(optimizeListener)
+        if (diaryReceiverOn) runCatching { unregisterReceiver(diaryStateReceiver) }
+        if (prefs.diaryEnabled) diaryAttach(false) // 우리 버튼이 사라지니 일기장 앱이 자기 버튼을 다시 보여 주게
         peeHandler.removeCallbacks(peeTick)
         cancelPeeNotification()
         voiceWanted = false
@@ -198,6 +209,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
             Prefs.KEY_STICKERS -> rebuildStickers()
             Prefs.KEY_RESTART_APPS, Prefs.KEY_FOLDERS, Prefs.KEY_OPT_ENABLED -> buildAll()
+            Prefs.KEY_DIARY_ENABLED -> {
+                diaryAttach(prefs.diaryEnabled)
+                buildAll()
+            }
             Prefs.KEY_LAB_PAUSE_LANDSCAPE -> buildAll()
             Prefs.KEY_PEE_ENABLED, Prefs.KEY_WATER_MODE, Prefs.KEY_SHOW_MAIN_RESTART,
             Prefs.KEY_CAPTURE_ENABLED, Prefs.KEY_VOICE_ENABLED -> buildAll()
@@ -272,6 +287,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         if (!waterOnly() && prefs.captureButtonEnabled) addCaptureBubble()
         if (!waterOnly() && prefs.voiceButtonEnabled) addVoiceBubble()
         if (!waterOnly() && prefs.optimizeEnabled) addOptimizeBubble()
+        if (!waterOnly() && prefs.diaryEnabled) {
+            addDiaryBubble(DiaryLink.KIND_DIARY)
+            addDiaryBubble(DiaryLink.KIND_IDEA)
+        }
         if (callBubbleWanted()) addCallBubble()
         layoutExpandedFolders()
         updatePeeState()
@@ -359,6 +378,118 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         styleOptimize()
     }
 
+    // ---------------- 일기장 쓰기 버튼 (실험실) ----------------
+    // 버튼은 여기서 그리고, 녹음·전송은 일기장 앱이 한다. (DiaryLink 참고)
+
+    private var diaryState = "idle" // idle / recording / sending
+    private var diaryKind = ""      // 녹음·전송 중인 버튼 ("diary" / "idea")
+    private var diaryReceiverOn = false
+
+    private val diaryStateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            if (i?.action != DiaryLink.STATE_ACTION) return
+            setDiaryState(i.getStringExtra("state"), i.getStringExtra("kind"))
+        }
+    }
+
+    private fun setDiaryState(state: String?, kind: String?) {
+        diaryState = state ?: "idle"
+        diaryKind = kind ?: ""
+        styleDiary()
+    }
+
+    /** 일기장 앱에 "버튼은 내가 보여 줄게"(on) / "이제 네가 보여 줘"(off)를 알린다. */
+    private fun diaryAttach(on: Boolean) {
+        val app = applicationContext
+        Thread {
+            val r = DiaryLink.call(app, if (on) "attach" else "detach")
+            if (on && r != null) peeHandler.post { setDiaryState(r.getString("state"), r.getString("kind")) }
+        }.start()
+    }
+
+    private fun addDiaryBubble(kind: String) {
+        if (bubbles.any { it.diary == kind } || hiddenByFolder(kind)) return
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(diary = kind)
+        b.iv = ImageView(this)
+        b.tv = TextView(this).apply {
+            text = if (kind == DiaryLink.KIND_DIARY) "📖" else "💡"
+            setTextColor(0xFFFFFFFF.toInt())
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sizePx * 0.45f)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            maxLines = 1
+        }
+        b.frame = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setStroke(dp(2), 0xFFFFFFFF.toInt())
+            }
+            elevation = dp(6).toFloat()
+            addView(b.iv, FrameLayout.LayoutParams(1, 1, Gravity.CENTER))
+            addView(b.tv, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER
+            ))
+        }
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+        styleDiary()
+        val (sx, sy) = savedPosOf(b)
+        val (cx, cy) = resolveCollision(b, sx, sy)
+        clampAndApply(b, cx, cy)
+    }
+
+    /** 평소 📖 보라 · 💡 주황 → 녹음 중 빨강 → 보내는 중 파랑 (일기장 앱과 같은 색) */
+    private fun styleDiary() {
+        for (b in bubbles) {
+            val kind = b.diary ?: continue
+            val color = when {
+                kind != diaryKind || diaryState == "idle" ->
+                    if (kind == DiaryLink.KIND_DIARY) DIARY_COLOR else IDEA_COLOR
+                diaryState == "recording" -> DIARY_REC_COLOR
+                else -> DIARY_SEND_COLOR
+            }
+            (b.frame.background as? GradientDrawable)?.setColor(color)
+        }
+    }
+
+    /** 탭 = 녹음 시작/끝. 일기장 앱의 녹음 서비스가 꺼져 있으면 앱을 잠깐 열어 시작한다. */
+    private fun onDiaryTapped(kind: String) {
+        val app = applicationContext
+        Thread {
+            val r = DiaryLink.call(app, "toggle", kind)
+            val installed = DiaryLink.isInstalled(app)
+            peeHandler.post {
+                if (!isRunning) return@post
+                when {
+                    r == null && !installed -> toast("일기장 앱이 설치되어 있지 않아요")
+                    r == null -> toast("일기장 앱을 최신 버전으로 업데이트해 주세요")
+                    r.getString("result") == "need_open" -> {
+                        toast("일기장 앱을 잠깐 열어 녹음을 시작해요")
+                        try {
+                            startActivity(DiaryLink.activityIntent(record = kind))
+                        } catch (e: Exception) {
+                            toast("일기장 앱을 열지 못했어요")
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }.start()
+    }
+
+    /** 길게 누르기 = 일기장 앱의 최근 일기(📖) / 아이디어(💡) 페이지 열기 */
+    private fun openDiaryPage(kind: String) {
+        try {
+            startActivity(DiaryLink.activityIntent(open = kind))
+        } catch (e: Exception) {
+            toast(if (DiaryLink.isInstalled(this)) "일기장 앱을 열지 못했어요" else "일기장 앱이 설치되어 있지 않아요")
+        }
+    }
+
     // ---------------- 폴더 ----------------
 
     private fun validFolderKeys(): Set<String> = buildSet {
@@ -368,6 +499,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         if (prefs.captureButtonEnabled) add("capture")
         if (prefs.voiceButtonEnabled) add("voice")
         if (prefs.optimizeEnabled) add("optimize")
+        if (prefs.diaryEnabled) {
+            add(DiaryLink.KIND_DIARY)
+            add(DiaryLink.KIND_IDEA)
+        }
         if (Features.PEE && prefs.peeTrackerEnabled) add("pee")
     }
 
@@ -472,6 +607,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             key == "capture" -> addCaptureBubble()
             key == "voice" -> addVoiceBubble()
             key == "optimize" -> addOptimizeBubble()
+            key == DiaryLink.KIND_DIARY || key == DiaryLink.KIND_IDEA -> if (prefs.diaryEnabled) addDiaryBubble(key)
             key == "pee" -> addPeeBubble()
         }
     }
@@ -1489,6 +1625,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
         } else if (b.callBoost) {
             // 글자만 있는 버튼
+        } else if (b.diary != null) {
+            b.tv?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sizePx * 0.45f)
         } else if (b.capture || b.voice || b.isFolder || b.optimize) {
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER)
         } else {
@@ -1530,6 +1668,16 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 val (w, h) = screenSize()
                 if (prefs.callPosX < 0 || prefs.callPosY < 0) (w - dp(prefs.buttonSizeDp) - dp(12)) to (h * 0.3f).roundToInt()
                 else prefs.callPosX to prefs.callPosY
+            }
+            b.diary != null -> {
+                val (x, y) = prefs.diaryPos(b.diary)
+                if (x < 0 || y < 0) {
+                    // 처음에는 오른쪽 벽에 📖 위, 💡 바로 아래
+                    val (w, h) = screenSize()
+                    val size = dp(prefs.buttonSizeDp)
+                    val step = if (b.diary == DiaryLink.KIND_IDEA) size + dp(prefs.buttonGapDp) else 0
+                    (w - size) to ((h * 0.2f).roundToInt() + step)
+                } else x to y
             }
             b.optimize -> {
                 val (_, h) = screenSize()
@@ -1740,6 +1888,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
             b.callBoost -> onCallBubbleTapped() // 길게 눌러도 켜기/끄기 (지우지 않음)
             b.isFolder -> {} // 폴더는 더 길게 눌러야 풀린다 (DragTouchListener 에서 처리)
+            b.diary != null -> { // 일기장 앱의 최근 페이지 열기 (지우지 않음)
+                openDiaryPage(b.diary)
+                if (b.inFolder >= 0) collapseFolder(b.inFolder)
+            }
             b.optimize -> {
                 prefs.optimizeEnabled = false
                 toast("폰 최적화 버튼을 지웠어요")
@@ -1767,6 +1919,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun savePositionAt(b: Bubble, x: Int, y: Int) {
         when {
             b.isFolder -> prefs.updateFolderPosition(b.folderId, x, y)
+            b.diary != null -> prefs.setDiaryPos(b.diary, x, y)
             b.optimize -> {
                 prefs.optPosX = x
                 prefs.optPosY = y
@@ -1915,11 +2068,12 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.voice -> onVoiceTapped()
             b.callBoost -> onCallBubbleTapped()
             b.optimize -> onOptimizeTapped()
+            b.diary != null -> onDiaryTapped(b.diary)
             b.isRestart -> onRestartTapped(b)
             else -> launchApp(b.launchPkg!!)
         }
         // 폴더에서 꺼낸 버튼을 눌렀으면 폴더를 다시 닫는다 (음성 입력은 녹음 중이라 열어 둠)
-        if (b.inFolder >= 0 && !b.voice) collapseFolder(b.inFolder)
+        if (b.inFolder >= 0 && !b.voice && b.diary == null) collapseFolder(b.inFolder)
     }
 
     private fun openMainApp() {
@@ -2023,6 +2177,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val FOLDER_DISSOLVE_MS = 1500L // 폴더는 이만큼 눌러야 풀린다
         private const val DOUBLE_TAP_MS = 280L // 이 안에 한 번 더 누르면 더블탭
         private val FOLDER_COLOR = 0xFF5B6770.toInt()
+        private val DIARY_COLOR = 0xFF7C5CFF.toInt() // 📖 평소: 보라
+        private val IDEA_COLOR = 0xFFF59F00.toInt() // 💡 평소: 주황
+        private val DIARY_REC_COLOR = 0xFFE03131.toInt() // 녹음 중: 빨강
+        private val DIARY_SEND_COLOR = 0xFF3B82F6.toInt() // 보내는 중: 파랑
         private val OPT_COLOR = 0xFFF59E0B.toInt()
         private val OPT_RUNNING_COLOR = 0xFFFFD60A.toInt() // 진행 중: 노랑
         private val OPT_DONE_COLOR = 0xFF2F80ED.toInt() // 완료: 파랑

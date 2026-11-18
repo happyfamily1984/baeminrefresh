@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.28.2 (versionCode 58)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.29.0 (versionCode 59)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -38,15 +38,16 @@
 | `PhoneOptimizer.kt` | 폰 최적화 엔진(object). 대상 자동 선택, 보호 목록, 강제 중지 반복, 알림 지우기, 결과 토스트 |
 | `FolderPickerActivity.kt` | 폴더 더블탭 시 뜨는 투명 앱 선택 창(여러 앱 체크 → 스티커로 만들어 폴더에 넣음) |
 | `TargetApps.kt` | 실행 가능한 앱 목록, 배민커넥트/카카오 T 픽커 감지 점수 |
+| `DiaryLink.kt` | 일기장 앱(`io.github.happyfamily1984.diary`, 저장소 `happyfamily1984/diary-app`) 연결: 명령 보내기(provider call), 화면 열기 인텐트 |
 | `BootReceiver.kt`, `Features.kt` | 부팅 시 자동 시작 / 기능 플래그 |
 
 ### 꼭 알아둘 설계 규칙
 
-- **버튼 키 체계(폴더용)**: `"main"`(기본 재시작) · `"rapp:<pkg>"` · `"sticker:<pkg>"` · `"capture"` · `"voice"` · `"pee"` · `"optimize"`. 통화 증폭 버튼(`callBoost`)은 통화 중에만 뜨는 임시 버튼이라 폴더 불가. 새 버튼을 추가하면 `Bubble.key`, `validFolderKeys()`, `addBubbleByKey()`, `Prefs.savedPosOfKey/setSavedPosOfKey`, `savedPosOf`, `savePositionAt`, `onBubbleTapped`, `onLongPress`, `applyAppearance`, `buildAll`, 폴더 만들기 목록(`MainActivity.showFolderCreator`)을 모두 손봐야 한다.
+- **버튼 키 체계(폴더용)**: `"main"`(기본 재시작) · `"rapp:<pkg>"` · `"sticker:<pkg>"` · `"capture"` · `"voice"` · `"pee"` · `"optimize"` · `"diary"` · `"idea"`(일기장 쓰기). 통화 증폭 버튼(`callBoost`)은 통화 중에만 뜨는 임시 버튼이라 폴더 불가. 새 버튼을 추가하면 `Bubble.key`, `validFolderKeys()`, `addBubbleByKey()`, `Prefs.savedPosOfKey/setSavedPosOfKey`, `savedPosOf`, `savePositionAt`, `onBubbleTapped`, `onLongPress`, `applyAppearance`, `buildAll`, 폴더 만들기 목록(`MainActivity.showFolderCreator`)을 모두 손봐야 한다.
 - **재진입 주의**: prefs 리스너(`onSharedPreferenceChanged`)는 메인 스레드에서 **동기**로 `buildAll()`을 부른다. `buildAll()` 안에서 prefs를 쓰면 중첩 재구성이 일어나므로, 정리 저장은 `peeHandler.post{}`로 미룬다(`refreshFolders` 참고).
 - **폴더**: 닫힌 폴더의 멤버는 `hiddenByFolder(key)`로 각 `addXxxBubble()` 맨 앞에서 건너뜀. 펼치면 멤버 버블을 만들고 `layoutFolder()`가 폴더 바로 아래(공간 없으면 위)에 세로로 세움. 펼친 멤버는 `inFolder>=0`이라 위치 저장 안 함, 세로로만 끌어 순서 변경(`reorderFolderMember`). 폴더 탭 0.28초 지연 후 더블탭 판정. 길게 0.6초=반응, 1.5초=폴더 풀기(`dissolveFolder`).
 - **오버레이**: 접근성 연결 시 `TYPE_ACCESSIBILITY_OVERLAY`(통화 화면 위에도 보임), 아니면 `TYPE_APPLICATION_OVERLAY`. `refreshOverlayType()`.
-- **길게 누르기 규칙**: 일반 아이콘=삭제/숨김, 배민리프레시 기본 버튼=앱 열기, 물방울=워터모드 토글, 폴더=1.5초 풀기, 최적화 버튼=삭제, 통화 증폭 버튼=켜기/끄기.
+- **길게 누르기 규칙**: 일반 아이콘=삭제/숨김, 배민리프레시 기본 버튼=앱 열기, 물방울=워터모드 토글, 폴더=1.5초 풀기, 최적화 버튼=삭제, 일기장 📖·💡=일기장 앱 최근 페이지 열기, 통화 증폭 버튼=켜기/끄기.
 - **접근성 설정 XML**: `res/xml/*access*.xml` — `canPerformGestures`, `flagRetrieveInteractiveWindows` 켜져 있음(탭·창 목록 필요).
 
 ## 3. 기능 · 버전 이력 요약
@@ -60,6 +61,11 @@
 - 1.26 **폴더**(설정 화면 "📁 폴더" 카드에서 만들기), 1.27 폴더 더블탭=앱 추가, 폴더 안 순서 변경; 음성: 중간 결과 보존·신뢰도 선택·배달 용어 힌트·오프라인 우선 옵션.
 - 1.28.x 실험실 **폰 최적화**(주황 ⚡버튼: 평소 주황 → 진행 중 노랑+`n/m` → 끝나면 파랑). 최근 24시간 쓴 앱 중 보호 목록 밖을 자동 선택 → `killBackgroundProcesses` → (옵션, 기본 켜짐) 접근성 강제 중지(`FLAG_STOPPED`인 앱은 건너뜀) → (옵션, 기본 켜짐) 알림창 모두 지우기 → 쓰던 앱으로 복귀 → 메모리 전/후 토스트. 상태 표시(메모리·저장공간·재부팅 후 경과, 3일 이상이면 권유), 전원 메뉴 열기, 보호 앱 목록 편집, 사용 기록 접근 권한 안내.
   - 기본 보호 앱(이름 키워드): 이 앱, 배민커넥트, 카카오 T 픽커, 쿠팡이츠, 클로드, MUSE, 피클, ChatGPT, 네이버지도, 유튜브, 유튜브 뮤직, 전화·문자. 항상 보호: 스티커/재시작앱/지정 앱, 키보드, 홈, 접근성·알림접근 앱, 시작 시 보던 앱, 30분 안에 포그라운드 서비스를 쓴 앱.
+- 1.29.0 실험실 **일기장 쓰기**: 켜면 📖 일기 · 💡 아이디어 버튼이 다른 버튼과 같은 규칙(벽 붙이기·크기·간격·폴더)으로 뜬다. 탭=녹음 시작/끝, 길게=일기장 앱 최근 일기/아이디어 페이지. 색: 보라/주황 → 녹음 중 빨강 → 보내는 중 파랑.
+  - 버튼만 배민리프레시가 그리고 **녹음·전송은 일기장 앱**이 한다(일기장 앱 2.4 이상 필요, `diary-app`의 `LinkProvider.java`). 통로: `content://io.github.happyfamily1984.diary.link` 에 `call("attach"|"detach"|"toggle"|"state")` — 일기장 앱은 호출한 앱이 `com.baeminrefresh.app`일 때만 받는다. 상태는 일기장 앱이 `io.github.happyfamily1984.diary.STATE` 방송으로 알려 준다.
+  - 연결 중(`hosted`)에는 일기장 앱의 자기 버튼이 숨겨지고, 기능을 끄거나 플로팅 서비스가 끝나면 `detach`로 되돌린다.
+  - 일기장 앱의 녹음 서비스가 꺼져 있으면(재부팅 직후 등) `toggle`이 `need_open`을 돌려주고, 일기장 앱 화면을 `record` extra로 잠깐 열어 녹음을 시작한 뒤 뒤로 물러난다(마이크 포그라운드 서비스는 앱이 보일 때만 시작 가능).
+  - 폰 최적화: 기능이 켜져 있으면 일기장 앱은 항상 보호.
 
 ## 4. 기기 검증 상태 (중요)
 
@@ -70,6 +76,7 @@
   3. **폴더**(펼침 위치, 더블탭 앱 추가, 순서 바꾸기, 1.5초 풀기).
   4. **카카오 T 픽커 자동 닫기** 1.23.2(수락 버튼 팝업 대응) 결과.
   5. 음성 "오프라인 우선" 옵션이 체감에 도움이 되는지.
+  6. **일기장 쓰기(1.29.0)**: 탭 녹음/색 변화, 재부팅 뒤 첫 탭(일기장 앱이 잠깐 열렸다 닫힘), 길게 누르기, 일기장 앱 자기 버튼 숨김/복귀.
 
 ## 5. 알려진 한계 · 사용자에게 이미 설명한 것
 

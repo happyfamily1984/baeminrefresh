@@ -913,6 +913,54 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/card"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="1dp"
+                app:strokeWidth="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="📔 일기장 쓰기"
+                            android:textColor="@color/text_main"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:lineSpacingExtra="2dp"
+                            android:text="켜면 플로팅 📖 일기 · 💡 아이디어 버튼이 생겨요. 누르면 녹음 시작(빨강), 다시 누르면 끝나고 일기장으로 보내요(파랑). 길게 누르면 일기장 앱의 최근 일기 / 아이디어 페이지가 열려요. 일기장 앱이 설치되어 있어야 하고, 켜져 있는 동안 일기장 앱의 자기 버튼은 숨겨져요."
+                            android:textColor="@color/text_sub"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/diary_switch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
 <com.google.android.material.card.MaterialCardView
                 android:id="@+id/pee_card"
                 android:layout_width="match_parent"

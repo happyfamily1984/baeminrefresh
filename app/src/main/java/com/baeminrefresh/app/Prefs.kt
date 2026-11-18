@@ -167,6 +167,20 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_OPT_NOTIF, true)
         set(value) = sp.edit().putBoolean(KEY_OPT_NOTIF, value).apply()
 
+    // ---------------- 일기장 쓰기 (실험실) ----------------
+
+    /** 켜면 일기장 앱의 📖 일기 · 💡 아이디어 버튼을 배민리프레시가 대신 보여 준다 */
+    var diaryEnabled: Boolean
+        get() = sp.getBoolean(KEY_DIARY_ENABLED, false)
+        set(value) = sp.edit().putBoolean(KEY_DIARY_ENABLED, value).apply()
+
+    /** kind = "diary" 또는 "idea" */
+    fun diaryPos(kind: String): Pair<Int, Int> =
+        sp.getInt("${kind}_btn_pos_x", -1) to sp.getInt("${kind}_btn_pos_y", -1)
+
+    fun setDiaryPos(kind: String, x: Int, y: Int) =
+        sp.edit().putInt("${kind}_btn_pos_x", x).putInt("${kind}_btn_pos_y", y).apply()
+
     var optPosX: Int
         get() = sp.getInt(KEY_OPT_X, -1)
         set(value) = sp.edit().putInt(KEY_OPT_X, value).apply()
@@ -355,6 +369,7 @@ class Prefs(context: Context) {
         key == "voice" -> voicePosX to voicePosY
         key == "pee" -> peePosX to peePosY
         key == "optimize" -> optPosX to optPosY
+        key == "diary" || key == "idea" -> diaryPos(key)
         key.startsWith("rapp:") -> getRestartApps().firstOrNull { it.packageName == key.removePrefix("rapp:") }
             ?.let { it.x to it.y } ?: (-1 to -1)
         key.startsWith("sticker:") -> getStickers().firstOrNull { it.packageName == key.removePrefix("sticker:") }
@@ -369,6 +384,7 @@ class Prefs(context: Context) {
             key == "voice" -> { voicePosX = x; voicePosY = y }
             key == "pee" -> { peePosX = x; peePosY = y }
             key == "optimize" -> { optPosX = x; optPosY = y }
+            key == "diary" || key == "idea" -> setDiaryPos(key, x, y)
             key.startsWith("rapp:") -> updateRestartAppPosition(key.removePrefix("rapp:"), x, y)
             key.startsWith("sticker:") -> updateStickerPosition(key.removePrefix("sticker:"), x, y)
         }
@@ -390,6 +406,7 @@ class Prefs(context: Context) {
         const val KEY_OPT_NOTIF = "lab_opt_notif"
         const val KEY_OPT_X = "opt_pos_x"
         const val KEY_OPT_Y = "opt_pos_y"
+        const val KEY_DIARY_ENABLED = "lab_diary_enabled"
         const val KEY_OPT_ADD = "opt_protect_add"
         const val KEY_OPT_REMOVE = "opt_protect_remove"
         const val KEY_VOICE_OFFLINE = "voice_offline"
