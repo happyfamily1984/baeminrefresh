@@ -144,6 +144,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshReplyDebug()
         if (prefs.targetPackage == null) {
             TargetApps.detectBaeminConnect(this)?.let { prefs.targetPackage = it.packageName }
         }
@@ -806,6 +807,13 @@ class MainActivity : AppCompatActivity() {
         override fun onFinished() = refreshOptimizer()
     }
 
+    private fun refreshReplyDebug() {
+        val dbg = findViewById<TextView>(R.id.reply_debug)
+        val last = prefs.replyLastDebug
+        dbg.visibility = if (last.isEmpty()) View.GONE else View.VISIBLE
+        dbg.text = "🔎 지난번 실패 기록 (길게 누르면 복사):\n$last"
+    }
+
     private fun setupReply() {
         val sw = findViewById<MaterialSwitch>(R.id.reply_switch)
         val status = findViewById<TextView>(R.id.reply_status)
@@ -846,11 +854,8 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<MaterialButton>(R.id.reply_pw_btn).setOnClickListener { check(pw.text.toString().trim(), save = true) }
         check(prefs.replyPassword, save = false)
-        val dbg = findViewById<TextView>(R.id.reply_debug)
-        val last = prefs.replyLastDebug
-        dbg.visibility = if (last.isEmpty()) View.GONE else View.VISIBLE
-        dbg.text = "🔎 지난번 실패 기록 (길게 누르면 복사):\n$last"
-        dbg.setOnLongClickListener {
+        refreshReplyDebug()
+        findViewById<TextView>(R.id.reply_debug).setOnLongClickListener {
             val cm = getSystemService(android.content.ClipboardManager::class.java)
             cm.setPrimaryClip(android.content.ClipData.newPlainText("reply debug", prefs.replyLastDebug))
             Toast.makeText(this, "복사했어요", Toast.LENGTH_SHORT).show()
