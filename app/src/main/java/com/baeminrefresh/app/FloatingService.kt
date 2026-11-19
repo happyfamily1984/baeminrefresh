@@ -566,7 +566,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             longToast(
                 if (chat.mode == "thread") {
                     if (chat.target.isEmpty()) "답글을 달 글을 찾지 못했어요. 답글 쓰는 칸이 보이는 화면에서 눌러 주세요"
-                    else "${chat.target}님의 글을 화면에서 찾지 못했어요. 글이 보이게 화면을 조금 내린 뒤 눌러 주세요"
+                    else "${chat.target}님의 글을 찾지 못했어요" +
+                        if (chat.debug.isNotEmpty()) "\n화면에서 찾은 글자: ${chat.debug}" else ""
                 } else "화면에서 대화 내용을 찾지 못했어요"
             )
             return

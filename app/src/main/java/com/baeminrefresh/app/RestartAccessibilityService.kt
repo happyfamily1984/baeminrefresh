@@ -184,7 +184,10 @@ class RestartAccessibilityService : AccessibilityService() {
      * mode = "chat"(카카오톡·텔레그램 대화방: text = 화면 대화) 또는 "thread"(스레드 답글: text = 답글 달 사람의 글만,
      * target = 그 사람 아이디). draft = 입력창에 쓰던 글.
      */
-    class ChatScreen(val pkg: String, val text: String, val draft: String, val mode: String = "chat", val target: String = "")
+    class ChatScreen(
+        val pkg: String, val text: String, val draft: String,
+        val mode: String = "chat", val target: String = "", val debug: String = "",
+    )
 
     private fun isThreadsPkg(pkg: String?): Boolean = pkg == THREADS_PKG
 
@@ -304,8 +307,10 @@ class RestartAccessibilityService : AccessibilityService() {
         val boxTop = listOfNotNull(box, input).minOfOrNull { n -> Rect().also { n.getBoundsInScreen(it) }.top }
             ?: Int.MAX_VALUE
 
-        // 화면의 글자(글자 칸만: 이미지 설명은 빼서 사진 속 글자에 흔들리지 않게)
-        val items = ArrayList<TNode>()
+        // 화면의 글자 칸(text)과 설명(contentDescription)을 따로 모은다.
+        // 본문은 글자 칸에서만 읽고(사진 속 글자·이미지 설명에 흔들리지 않게), 설명은 아이디 찾기에만 쓴다.
+        val texts = ArrayList<TNode>()
+        val descs = ArrayList<TNode>()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         var count = 0
@@ -314,42 +319,65 @@ class RestartAccessibilityService : AccessibilityService() {
             count++
             for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
             if (isTextInput(n) || !n.isVisibleToUser) continue
-            val t = n.text?.toString()?.trim() ?: continue
-            if (t.isEmpty()) continue
             val r = Rect()
             n.getBoundsInScreen(r)
             if (r.isEmpty || r.top >= boxTop) continue
-            items.add(TNode(n, t, r))
+            n.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { texts.add(TNode(n, it, r)) }
+            n.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { descs.add(TNode(n, it, r)) }
         }
-        items.sortWith(compareBy({ it.rect.top }, { it.rect.left }))
+        val order = compareBy<TNode>({ it.rect.top }, { it.rect.left })
+        texts.sortWith(order)
+        descs.sortWith(order)
 
-        // 답글 달 사람의 아이디 칸 (같은 아이디가 여럿이면 입력칸에 가장 가까운 것)
-        val nameIdx = if (target.isNotEmpty()) items.indexOfLast { it.text == target }
-        else items.indexOfLast { HANDLE.matches(it.text) } // 안내 글자가 없으면 가장 아래쪽 아이디
+        // 아이디 칸: 글자가 아이디와 같거나("siwon9012"), 아이디로 시작하는 칸("siwon9012 16시간", "siwon9012, …")
+        fun isName(t: String): Boolean = target.isNotEmpty() &&
+            (t == target || t.startsWith("$target ") || t.startsWith("$target,") || t.startsWith("$target\n") ||
+                t.startsWith("$target·") || t.startsWith("$target •") || t == "@$target")
+        val nameText = texts.lastOrNull { isName(it.text) }
+        val nameDesc = descs.lastOrNull { isName(it.text) }
+        val name: TNode? = when {
+            target.isEmpty() -> texts.lastOrNull { HANDLE.matches(it.text) } // 안내 글자가 없으면 가장 아래쪽 아이디
+            nameText != null && nameDesc != null -> if (nameDesc.rect.top > nameText.rect.top) nameDesc else nameText
+            else -> nameText ?: nameDesc
+        }
+
         var body = ""
-        if (nameIdx >= 0) {
-            val name = items[nameIdx]
+        if (name != null) {
             val lines = ArrayList<String>()
-            for (i in nameIdx + 1 until items.size) {
-                val it = items[i]
+            for (it in texts) {
+                if (it.rect.top < name.rect.top) continue
+                if (it.node == name.node || it.text == name.text) continue
                 // 아이디와 같은 줄(시간 "16시간", "> 커뮤니티" 등)은 건너뜀
                 if (it.rect.centerY() in name.rect.top..name.rect.bottom) continue
+                // 아이디 칸이 글 전체를 감싸는 큰 칸이면 그 안의 글자만
+                if (name.rect.height() > dpPx(80) && !name.rect.contains(it.rect.centerX(), it.rect.centerY())) break
                 val t = it.text
                 if (THREAD_SKIP.matches(t)) continue
                 // 여기서부터는 본문이 아님: 링크 미리보기, 좋아요·답글 수, '활동 보기', 다음 사람 아이디
                 if (DOMAIN.matches(t) || COUNT.matches(t) || t == "활동 보기" || t == "View activity") break
-                if (lines.isNotEmpty() && HANDLE.matches(t)) break
+                if (lines.isNotEmpty() && (HANDLE.matches(t) || isName(t))) break
                 lines.add(t)
                 if (lines.sumOf { l -> l.length } > 2000) break
             }
             body = lines.joinToString("\n")
+            // 아이디·시간·본문이 한 칸에 합쳐진 화면: 그 칸의 글에서 아이디와 시간을 떼어 낸다
+            if (body.isBlank() && name.text.length > target.length + 3) {
+                body = name.text.removePrefix("@").removePrefix(target)
+                    .replace(Regex("^[\\s,·•]*[0-9]+\\s*(초|분|시간|일|주|개월|년|s|m|h|d|w)(\\s*전)?[\\s,·•]*"), "")
+                    .trim(' ', ',', '·', '•', '\n')
+            }
         }
         var draft = input?.text?.toString()?.trim() ?: ""
         val hint = input?.hintText?.toString()
         if ((!hint.isNullOrEmpty() && draft == hint) || THREAD_HINT_KO.containsMatchIn(draft) ||
             THREAD_HINT_EN.containsMatchIn(draft)) draft = ""
-        return ChatScreen(pkg, body, draft, mode = "thread", target = target)
+        // 못 찾았을 때 안내용: 입력칸 바로 위쪽에서 읽힌 글자 몇 개
+        val debug = if (body.isNotBlank()) "" else (texts + descs).sortedWith(order).takeLast(8)
+            .joinToString(" | ") { it.text.replace('\n', ' ').take(25) }
+        return ChatScreen(pkg, body, draft, mode = "thread", target = target, debug = debug)
     }
+
+    private fun dpPx(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     /**
      * 답글을 입력칸에 넣는다(전송·게시는 누르지 않음). 스레드처럼 입력칸이 접혀 있으면 먼저 눌러 펼친 뒤 다시 시도.

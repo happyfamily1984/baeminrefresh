@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.31.0 (versionCode 61)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.31.1 (versionCode 62)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -71,6 +71,7 @@
   - **키 보관**: GitHub Secret `GEMINI_API_KEYS`(여러 개는 줄바꿈·쉼표) + `GEMINI_KEYS_PASSWORD`. `app/build.gradle.kts`가 빌드 때 PBKDF2(30만 회)+AES-GCM으로 암호화해 `BuildConfig.GEMINI_KEYS_ENC`에 넣는다(저장소·APK가 공개라 평문 금지). 폰에서는 실험실 카드에 비밀번호를 한 번 입력(Prefs에 저장). Secret이 없으면 빈 문자열 → 기능이 "키 없음"으로 안내. **비밀번호·키를 저장소/커밋/문서에 적지 말 것.**
   - 모델 순서(`ReplyAi.MODELS`, 사용자 지정): `gemini-3.1-flash-lite` → `gemini-3.5-flash-lite` → `gemini-flash-lite-latest` → `gemini-3.8-flash`. 404·기타 400=다음 모델, 401/403/429/5xx·키 오류=다음 키. 마지막에 성공한 조합을 먼저 시도.
 - 1.31.0 답변 추천 다듬기: ① 카톡·텔레그램은 **짧은 대답·인사·추임새만**(새 정보·약속·의견 생성 금지, 모르면 "확인해 보고 말씀드릴게요"). ② **스레드(`com.instagram.barcelona`) 답글** 지원 — 같은 💬버튼. 답글 칸 안내 글자 "X님에게 답글 남기기"(영문 "Reply to X")에서 상대 아이디를 얻고, 화면에서 그 아이디(입력칸에 가장 가까운 것) **바로 아래 본문만** 읽음(`readThread`): 같은 줄의 시간·커뮤니티 표시, 이미지 설명(contentDescription), 링크 미리보기(도메인부터), 좋아요 수, '활동 보기', 다음 사람 아이디는 제외. 스레드 답글은 공감·의견·이어 갈 질문 1~3문장(사실 지어내기·욕설 금지). 답글 칸이 접혀 있으면 눌러 펼친 뒤 입력(`fillReply`, 0.7초×3회).
+- 1.31.1 스레드: 아이디 칸이 정확히 같은 글자가 아닐 때("아이디 16시간"처럼 붙은 칸, 설명(contentDescription)에만 있는 아이디, 아이디·본문이 한 칸에 합쳐진 경우)도 찾게 함. 그래도 못 찾으면 토스트에 "화면에서 찾은 글자: …"(입력칸 위쪽 8개)를 보여 줌 → 사용자가 보내 주면 그 형태에 맞추면 된다.
 
 ## 4. 기기 검증 상태 (중요)
 
