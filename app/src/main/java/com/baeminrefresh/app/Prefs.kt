@@ -183,7 +183,7 @@ class Prefs(context: Context) {
 
     // ---------------- 답변 추천 (실험실) ----------------
 
-    /** 켜면 플로팅 💬버튼이 뜬다 (텔레그램·카카오톡 대화를 읽고 답장을 입력창에 넣음) */
+    /** 켜면 플로팅 💬버튼이 뜬다 (텔레그램·카카오톡 대화, 스레드 답글을 읽고 답을 입력창에 넣음) */
     var replyEnabled: Boolean
         get() = sp.getBoolean(KEY_REPLY_ENABLED, false)
         set(value) = sp.edit().putBoolean(KEY_REPLY_ENABLED, value).apply()

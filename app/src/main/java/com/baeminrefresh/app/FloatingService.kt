@@ -56,7 +56,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val optimize: Boolean = false,
         /** 일기장 버튼: "diary"(📖 일기) 또는 "idea"(💡 아이디어) */
         val diary: String? = null,
-        /** 답변 추천 버튼 (텔레그램·카카오톡) */
+        /** 답변 추천 버튼 (텔레그램·카카오톡·스레드) */
         val reply: Boolean = false,
     ) {
         /** 펼쳐진 폴더 안에 보이는 중이면 그 폴더 id (끌기 불가, 폴더 옆에 자동 배치) */
@@ -559,11 +559,16 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
         val chat = ax.readChat()
         if (chat == null) {
-            longToast("텔레그램이나 카카오톡 대화방을 연 상태에서 눌러 주세요")
+            longToast("텔레그램·카카오톡 대화방이나 스레드 답글 화면에서 눌러 주세요")
             return
         }
         if (chat.text.isBlank()) {
-            toast("화면에서 대화 내용을 찾지 못했어요")
+            longToast(
+                if (chat.mode == "thread") {
+                    if (chat.target.isEmpty()) "답글을 달 글을 찾지 못했어요. 답글 쓰는 칸이 보이는 화면에서 눌러 주세요"
+                    else "${chat.target}님의 글을 화면에서 찾지 못했어요. 글이 보이게 화면을 조금 내린 뒤 눌러 주세요"
+                } else "화면에서 대화 내용을 찾지 못했어요"
+            )
             return
         }
         // 같은 대화 화면이면 앞의 추천을 기억해 두고 이번에는 다르게 받는다
@@ -577,7 +582,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         replyBusy = true
         styleReply()
         Thread {
-            val r = ReplyAi.suggest(pw, chat.pkg, chat.text, draft, prev)
+            val r = ReplyAi.suggest(pw, chat.pkg, chat.text, draft, prev, chat.mode, chat.target)
             peeHandler.post {
                 replyBusy = false
                 styleReply()
@@ -589,8 +594,12 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 }
                 replyPrev.add(text)
                 if (replyPrev.size > 5) replyPrev.removeAt(0)
-                val ok = RestartAccessibilityService.instance?.setChatInput(text) == true
-                if (!ok) longToast("입력창을 찾지 못했어요")
+                val axNow = RestartAccessibilityService.instance
+                if (axNow == null) {
+                    longToast("입력창을 찾지 못했어요")
+                    return@post
+                }
+                axNow.fillReply(text) { ok -> if (!ok) longToast("입력창을 찾지 못했어요") }
             }
         }.start()
     }

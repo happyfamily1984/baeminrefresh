@@ -991,7 +991,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="💬 답변 추천 (텔레그램·카카오톡)"
+                                android:text="💬 답변 추천 (카카오톡·텔레그램·스레드)"
                                 android:textColor="@color/text_main"
                                 android:textSize="16sp"
                                 android:textStyle="bold" />
@@ -1001,7 +1001,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
                                 android:lineSpacingExtra="2dp"
-                                android:text="켜면 플로팅 💬버튼이 생겨요. 텔레그램이나 카카오톡 대화방에서 누르면 화면의 마지막 대화를 읽고 AI가 쓴 답장을 입력창에 넣어요(전송은 직접). 한 번 더 누르면 다른 답장으로 바꿔요. 입력창에 쓰던 글이 있으면 그 뜻을 살려 다듬어요. 접근성이 켜져 있어야 하고, 누를 때 화면의 대화 내용이 구글(제미나이)로 전송돼요."
+                                android:text="켜면 플로팅 💬버튼이 생겨요. 카카오톡·텔레그램 대화방에서 누르면 마지막 대화를 읽고 짧은 대답·인사·추임새를 입력창에 넣어요(새로운 정보는 만들지 않아요). 스레드 답글 화면에서 누르면 답글 달 사람의 글만 읽고 공감·의견·질문으로 답글을 써 줘요. 전송·게시는 직접 누르세요. 한 번 더 누르면 다른 답으로 바꿔요. 입력창에 쓰던 글이 있으면 그 뜻을 살려 다듬어요. 접근성이 켜져 있어야 하고, 누를 때 읽은 글이 구글(제미나이)로 전송돼요."
                                 android:textColor="@color/text_sub"
                                 android:textSize="13sp" />
                         </LinearLayout>

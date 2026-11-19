@@ -180,12 +180,19 @@ class RestartAccessibilityService : AccessibilityService() {
 
     // ---------------- 답변 추천: 대화 읽기 / 입력창 채우기 ----------------
 
-    class ChatScreen(val pkg: String, val text: String, val draft: String)
+    /**
+     * mode = "chat"(카카오톡·텔레그램 대화방: text = 화면 대화) 또는 "thread"(스레드 답글: text = 답글 달 사람의 글만,
+     * target = 그 사람 아이디). draft = 입력창에 쓰던 글.
+     */
+    class ChatScreen(val pkg: String, val text: String, val draft: String, val mode: String = "chat", val target: String = "")
+
+    private fun isThreadsPkg(pkg: String?): Boolean = pkg == THREADS_PKG
 
     private fun isChatPkg(pkg: String?): Boolean =
-        pkg != null && (pkg == "com.kakao.talk" || pkg.contains("telegram") || pkg == "org.thunderdog.challegram")
+        pkg != null && (pkg == "com.kakao.talk" || pkg.contains("telegram") || pkg == "org.thunderdog.challegram" ||
+            isThreadsPkg(pkg))
 
-    /** 지금 화면에 떠 있는 텔레그램·카카오톡 창 (없으면 null) */
+    /** 지금 화면에 떠 있는 텔레그램·카카오톡·스레드 창 (없으면 null) */
     private fun chatRoot(): AccessibilityNodeInfo? {
         val roots = mutableListOf<AccessibilityNodeInfo>()
         rootInActiveWindow?.let { roots.add(it) }
@@ -208,6 +215,7 @@ class RestartAccessibilityService : AccessibilityService() {
      */
     fun readChat(): ChatScreen? {
         val root = chatRoot() ?: return null
+        if (isThreadsPkg(root.packageName?.toString())) return readThread(root)
         val input = chatInput(root)
         val inputTop = input?.let { n -> Rect().also { n.getBoundsInScreen(it) }.top } ?: Int.MAX_VALUE
         val screenW = resources.displayMetrics.widthPixels
@@ -249,6 +257,122 @@ class RestartAccessibilityService : AccessibilityService() {
         val hint = input?.hintText?.toString()
         if (!hint.isNullOrEmpty() && draft == hint) draft = ""
         return ChatScreen(root.packageName.toString(), kept.asReversed().joinToString("\n"), draft.trim())
+    }
+
+    // ---------------- 스레드(Threads) 답글 ----------------
+    // 답글 입력칸의 안내 글자("siwon9012님에게 답글 남기기…")에서 상대 아이디를 알아내고,
+    // 화면에서 그 아이디 바로 아래에 있는 본문만 읽는다. 원글·다른 답글·이미지 속 글자·링크 미리보기·
+    // 좋아요 수 같은 화면 글자는 넣지 않는다(엉뚱한 답이 나오지 않게).
+
+    private class TNode(val node: AccessibilityNodeInfo, val text: String, val rect: Rect)
+
+    private fun nodeLabel(n: AccessibilityNodeInfo): String {
+        val parts = listOfNotNull(n.text, n.hintText, n.contentDescription)
+        return parts.joinToString(" ") { it.toString() }
+    }
+
+    /** 답글 입력칸(접힌 칸 포함): "…님에게 답글" / "Reply to …" 글자가 있는 가장 아래쪽 노드 */
+    private fun threadReplyBox(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var best: AccessibilityNodeInfo? = null
+        var bestTop = -1
+        forEachNode(root) { n ->
+            val l = nodeLabel(n)
+            if (THREAD_HINT_KO.containsMatchIn(l) || THREAD_HINT_EN.containsMatchIn(l)) {
+                val r = Rect()
+                n.getBoundsInScreen(r)
+                if (!r.isEmpty && r.top > bestTop) {
+                    bestTop = r.top
+                    best = n
+                }
+            }
+        }
+        return best
+    }
+
+    private fun threadTarget(box: AccessibilityNodeInfo?): String {
+        val l = box?.let { nodeLabel(it) } ?: return ""
+        THREAD_HINT_KO.find(l)?.let { return it.groupValues[1].trim() }
+        THREAD_HINT_EN.find(l)?.let { return it.groupValues[1].trim().trimEnd('.', '…') }
+        return ""
+    }
+
+    private fun readThread(root: AccessibilityNodeInfo): ChatScreen {
+        val pkg = root.packageName.toString()
+        val box = threadReplyBox(root)
+        val input = chatInput(root)
+        val target = threadTarget(box ?: input)
+        val boxTop = listOfNotNull(box, input).minOfOrNull { n -> Rect().also { n.getBoundsInScreen(it) }.top }
+            ?: Int.MAX_VALUE
+
+        // 화면의 글자(글자 칸만: 이미지 설명은 빼서 사진 속 글자에 흔들리지 않게)
+        val items = ArrayList<TNode>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var count = 0
+        while (queue.isNotEmpty() && count < 4000) {
+            val n = queue.removeFirst()
+            count++
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+            if (isTextInput(n) || !n.isVisibleToUser) continue
+            val t = n.text?.toString()?.trim() ?: continue
+            if (t.isEmpty()) continue
+            val r = Rect()
+            n.getBoundsInScreen(r)
+            if (r.isEmpty || r.top >= boxTop) continue
+            items.add(TNode(n, t, r))
+        }
+        items.sortWith(compareBy({ it.rect.top }, { it.rect.left }))
+
+        // 답글 달 사람의 아이디 칸 (같은 아이디가 여럿이면 입력칸에 가장 가까운 것)
+        val nameIdx = if (target.isNotEmpty()) items.indexOfLast { it.text == target }
+        else items.indexOfLast { HANDLE.matches(it.text) } // 안내 글자가 없으면 가장 아래쪽 아이디
+        var body = ""
+        if (nameIdx >= 0) {
+            val name = items[nameIdx]
+            val lines = ArrayList<String>()
+            for (i in nameIdx + 1 until items.size) {
+                val it = items[i]
+                // 아이디와 같은 줄(시간 "16시간", "> 커뮤니티" 등)은 건너뜀
+                if (it.rect.centerY() in name.rect.top..name.rect.bottom) continue
+                val t = it.text
+                if (THREAD_SKIP.matches(t)) continue
+                // 여기서부터는 본문이 아님: 링크 미리보기, 좋아요·답글 수, '활동 보기', 다음 사람 아이디
+                if (DOMAIN.matches(t) || COUNT.matches(t) || t == "활동 보기" || t == "View activity") break
+                if (lines.isNotEmpty() && HANDLE.matches(t)) break
+                lines.add(t)
+                if (lines.sumOf { l -> l.length } > 2000) break
+            }
+            body = lines.joinToString("\n")
+        }
+        var draft = input?.text?.toString()?.trim() ?: ""
+        val hint = input?.hintText?.toString()
+        if ((!hint.isNullOrEmpty() && draft == hint) || THREAD_HINT_KO.containsMatchIn(draft) ||
+            THREAD_HINT_EN.containsMatchIn(draft)) draft = ""
+        return ChatScreen(pkg, body, draft, mode = "thread", target = target)
+    }
+
+    /**
+     * 답글을 입력칸에 넣는다(전송·게시는 누르지 않음). 스레드처럼 입력칸이 접혀 있으면 먼저 눌러 펼친 뒤 다시 시도.
+     * 결과는 onDone(성공 여부)로.
+     */
+    fun fillReply(text: String, onDone: (Boolean) -> Unit) {
+        val h = Handler(Looper.getMainLooper())
+        fun attempt(left: Int) {
+            val root = chatRoot()
+            val hasInput = root?.let { chatInput(it) } != null
+            if (hasInput || root == null || !isThreadsPkg(root.packageName?.toString())) {
+                onDone(setChatInput(text))
+                return
+            }
+            if (left <= 0) {
+                onDone(false)
+                return
+            }
+            // 접힌 답글 칸("…님에게 답글 남기기")을 눌러 입력창을 연다
+            threadReplyBox(root)?.let { clickNodeOrParent(it) }
+            h.postDelayed({ attempt(left - 1) }, 700L)
+        }
+        attempt(3)
     }
 
     /** 대화방 입력창의 글을 통째로 바꾼다(전송은 누르지 않음). 안 되면 붙여넣기로 대체. */
@@ -844,6 +968,13 @@ class RestartAccessibilityService : AccessibilityService() {
     companion object {
         @Volatile
         var instance: RestartAccessibilityService? = null
+        const val THREADS_PKG = "com.instagram.barcelona"
+        private val THREAD_HINT_KO = Regex("^\\s*(.+?)님에게 답글")
+        private val THREAD_HINT_EN = Regex("^\\s*Reply to (.+?)(\\.\\.\\.|…|$)")
+        private val HANDLE = Regex("^(?=.*[A-Za-z])[A-Za-z0-9._]{2,30}$")
+        private val DOMAIN = Regex("^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.(com|net|org|kr|co|io|me|tv|ly|be|app|news)(/\\S*)?$")
+        private val COUNT = Regex("^[0-9][0-9,.]*\\s*[천만KkMm]?$")
+        private val THREAD_SKIP = Regex("^(더 보기|번역 보기|원문 보기|수정됨|작성자|See translation|more|Edited|Author|[0-9]+\\s*(초|분|시간|일|주|개월|년|s|m|h|d|w))$")
             private set
 
         private const val POLL_MS = 250L
