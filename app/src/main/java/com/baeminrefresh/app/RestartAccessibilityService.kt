@@ -968,6 +968,7 @@ class RestartAccessibilityService : AccessibilityService() {
     companion object {
         @Volatile
         var instance: RestartAccessibilityService? = null
+            private set
         const val THREADS_PKG = "com.instagram.barcelona"
         private val THREAD_HINT_KO = Regex("^\\s*(.+?)님에게 답글")
         private val THREAD_HINT_EN = Regex("^\\s*Reply to (.+?)(\\.\\.\\.|…|$)")
@@ -975,7 +976,6 @@ class RestartAccessibilityService : AccessibilityService() {
         private val DOMAIN = Regex("^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.(com|net|org|kr|co|io|me|tv|ly|be|app|news)(/\\S*)?$")
         private val COUNT = Regex("^[0-9][0-9,.]*\\s*[천만KkMm]?$")
         private val THREAD_SKIP = Regex("^(더 보기|번역 보기|원문 보기|수정됨|작성자|See translation|more|Edited|Author|[0-9]+\\s*(초|분|시간|일|주|개월|년|s|m|h|d|w))$")
-            private set
 
         private const val POLL_MS = 250L
         private const val TIMEOUT_MS = 8000L
