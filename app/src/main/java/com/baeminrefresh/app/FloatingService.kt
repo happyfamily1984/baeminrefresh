@@ -566,8 +566,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             longToast(
                 if (chat.mode == "thread") {
                     if (chat.target.isEmpty()) "답글을 달 글을 찾지 못했어요. 답글 쓰는 칸이 보이는 화면에서 눌러 주세요"
-                    else "${chat.target}님의 글을 찾지 못했어요" +
-                        if (chat.debug.isNotEmpty()) "\n화면에서 찾은 글자: ${chat.debug}" else ""
+                    else {
+                        prefs.replyLastDebug = "${chat.target}님 글을 못 찾음 · 화면에서 찾은 글자: ${chat.debug}"
+                        "${chat.target}님의 글을 찾지 못했어요. 배민리프레시 앱의 '답변 추천' 칸에 화면 글자를 남겨 뒀어요"
+                    }
                 } else "화면에서 대화 내용을 찾지 못했어요"
             )
             return

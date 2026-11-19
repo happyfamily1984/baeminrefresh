@@ -1022,6 +1022,17 @@
                         android:textColor="@color/text_main"
                         android:textSize="13sp" />
 
+                    <TextView
+                        android:id="@+id/reply_debug"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:lineSpacingExtra="2dp"
+                        android:textColor="@color/text_sub"
+                        android:textIsSelectable="false"
+                        android:textSize="12sp"
+                        android:visibility="gone" />
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"

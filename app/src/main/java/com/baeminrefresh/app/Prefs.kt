@@ -193,6 +193,11 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_REPLY_PASSWORD, "") ?: ""
         set(value) = sp.edit().putString(KEY_REPLY_PASSWORD, value).apply()
 
+    /** 답변 추천이 글을 못 찾았을 때 화면에서 읽힌 글자 (설정 화면에 보여 주고 사용자가 알려 줄 수 있게) */
+    var replyLastDebug: String
+        get() = sp.getString("lab_reply_debug", "") ?: ""
+        set(value) = sp.edit().putString("lab_reply_debug", value).apply()
+
     var optPosX: Int
         get() = sp.getInt(KEY_OPT_X, -1)
         set(value) = sp.edit().putInt(KEY_OPT_X, value).apply()
