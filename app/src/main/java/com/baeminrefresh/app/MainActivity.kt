@@ -113,6 +113,7 @@ class MainActivity : AppCompatActivity() {
         setupCallBoost()
         setupOptimizer()
         setupDiary()
+        setupReply()
 
         if (Features.PEE) {
             findViewById<View>(R.id.pee_card).visibility = View.VISIBLE
@@ -743,6 +744,7 @@ class MainActivity : AppCompatActivity() {
         if (prefs.captureButtonEnabled) items += "capture" to "화면 캡쳐"
         if (prefs.voiceButtonEnabled) items += "voice" to "음성 입력"
         if (prefs.optimizeEnabled) items += "optimize" to "폰 최적화"
+        if (prefs.replyEnabled) items += "reply" to "💬 답변 추천"
         if (prefs.diaryEnabled) {
             items += DiaryLink.KIND_DIARY to "📖 일기 쓰기"
             items += DiaryLink.KIND_IDEA to "💡 아이디어 쓰기"
@@ -802,6 +804,48 @@ class MainActivity : AppCompatActivity() {
     private val optimizerListener = object : PhoneOptimizer.Listener {
         override fun onProgress(done: Int, total: Int) = refreshOptimizer()
         override fun onFinished() = refreshOptimizer()
+    }
+
+    private fun setupReply() {
+        val sw = findViewById<MaterialSwitch>(R.id.reply_switch)
+        val status = findViewById<TextView>(R.id.reply_status)
+        val pw = findViewById<android.widget.EditText>(R.id.reply_pw)
+        sw.isChecked = prefs.replyEnabled
+        sw.setOnCheckedChangeListener { _, checked ->
+            prefs.replyEnabled = checked
+            if (checked && !FloatingService.isRunning) {
+                Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 💬버튼이 나타나요", Toast.LENGTH_LONG).show()
+            }
+        }
+        // 저장된(또는 방금 입력한) 비밀번호로 키가 풀리는지 확인해서 상태를 보여 준다
+        fun check(password: String, save: Boolean) {
+            if (!ReplyAi.hasBundledKeys()) {
+                status.text = "이 빌드에는 API 키가 들어 있지 않아요. GitHub Secret에 GEMINI_API_KEYS 와 GEMINI_KEYS_PASSWORD 를 등록한 뒤 새로 빌드된 앱을 설치해 주세요."
+                return
+            }
+            if (password.isEmpty()) {
+                status.text = "🔒 비밀번호를 한 번 입력해 주세요."
+                return
+            }
+            status.text = "확인하는 중…"
+            Thread {
+                val keys = ReplyAi.unlock(password)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (keys == null) {
+                        status.text = "❌ 비밀번호가 맞지 않아요."
+                    } else {
+                        if (save) {
+                            prefs.replyPassword = password
+                            pw.setText("")
+                        }
+                        status.text = "✅ 준비됐어요 (API 키 ${keys.size}개, 모델 ${ReplyAi.MODELS.size}개를 순서대로 사용)"
+                    }
+                }
+            }.start()
+        }
+        findViewById<MaterialButton>(R.id.reply_pw_btn).setOnClickListener { check(pw.text.toString().trim(), save = true) }
+        check(prefs.replyPassword, save = false)
     }
 
     private fun setupDiary() {

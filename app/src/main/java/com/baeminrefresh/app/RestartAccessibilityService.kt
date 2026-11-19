@@ -178,6 +178,101 @@ class RestartAccessibilityService : AccessibilityService() {
         return best
     }
 
+    // ---------------- 답변 추천: 대화 읽기 / 입력창 채우기 ----------------
+
+    class ChatScreen(val pkg: String, val text: String, val draft: String)
+
+    private fun isChatPkg(pkg: String?): Boolean =
+        pkg != null && (pkg == "com.kakao.talk" || pkg.contains("telegram") || pkg == "org.thunderdog.challegram")
+
+    /** 지금 화면에 떠 있는 텔레그램·카카오톡 창 (없으면 null) */
+    private fun chatRoot(): AccessibilityNodeInfo? {
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        rootInActiveWindow?.let { roots.add(it) }
+        runCatching {
+            for (w in windows) {
+                if (w.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue
+                w.root?.let { roots.add(it) }
+            }
+        }
+        return roots.firstOrNull { isChatPkg(it.packageName?.toString()) }
+    }
+
+    private fun chatInput(root: AccessibilityNodeInfo): AccessibilityNodeInfo? =
+        collectEditables(root).maxByOrNull { n -> Rect().also { n.getBoundsInScreen(it) }.bottom }
+
+    /**
+     * 텔레그램·카카오톡 화면에 보이는 글자를 위→아래 순서로 읽는다. (사용자가 버튼을 눌렀을 때만 호출)
+     * 말풍선이 오른쪽에 있으면 [오른쪽](대개 내가 보낸 말), 왼쪽이면 [왼쪽] 표시를 붙인다.
+     * 텔레그램·카카오톡이 아니면 null.
+     */
+    fun readChat(): ChatScreen? {
+        val root = chatRoot() ?: return null
+        val input = chatInput(root)
+        val inputTop = input?.let { n -> Rect().also { n.getBoundsInScreen(it) }.top } ?: Int.MAX_VALUE
+        val screenW = resources.displayMetrics.widthPixels
+        class Item(val top: Int, val left: Int, val line: String)
+        val items = ArrayList<Item>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var count = 0
+        while (queue.isNotEmpty() && count < 4000) {
+            val n = queue.removeFirst()
+            count++
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+            if (isTextInput(n) || !n.isVisibleToUser) continue
+            val t = (n.text ?: n.contentDescription)?.toString()?.trim() ?: continue
+            if (t.isEmpty()) continue
+            val r = Rect()
+            n.getBoundsInScreen(r)
+            if (r.isEmpty || r.top >= inputTop) continue // 입력창 줄과 그 아래(보내기 버튼, 키보드)는 제외
+            val side = when {
+                r.width() >= screenW * 0.9f -> ""
+                r.centerX() > screenW * 0.55f -> "[오른쪽] "
+                r.centerX() < screenW * 0.45f -> "[왼쪽] "
+                else -> ""
+            }
+            items.add(Item(r.top, r.left, side + t.take(600).replace('\n', ' ')))
+        }
+        items.sortWith(compareBy({ it.top }, { it.left }))
+        val lines = ArrayList<String>()
+        for (it in items) if (lines.lastOrNull() != it.line) lines.add(it.line)
+        // 너무 길면 아래쪽(최근 대화)만 남긴다
+        var total = 0
+        val kept = ArrayList<String>()
+        for (l in lines.asReversed()) {
+            if (total + l.length > 3000 && kept.isNotEmpty()) break
+            kept.add(l)
+            total += l.length
+        }
+        var draft = input?.text?.toString() ?: ""
+        val hint = input?.hintText?.toString()
+        if (!hint.isNullOrEmpty() && draft == hint) draft = ""
+        return ChatScreen(root.packageName.toString(), kept.asReversed().joinToString("\n"), draft.trim())
+    }
+
+    /** 대화방 입력창의 글을 통째로 바꾼다(전송은 누르지 않음). 안 되면 붙여넣기로 대체. */
+    fun setChatInput(text: String): Boolean {
+        val node = chatRoot()?.let { chatInput(it) } ?: return insertText(text)
+        if (!node.isFocused) {
+            if (!node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) {
+                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
+        }
+        val args = android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return insertText(text)
+        runCatching {
+            val sel = android.os.Bundle().apply {
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, text.length)
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, text.length)
+            }
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)
+        }
+        return true
+    }
+
     private fun isTextInput(n: AccessibilityNodeInfo): Boolean =
         n.isEditable || (n.className?.toString()?.contains("EditText") == true)
 

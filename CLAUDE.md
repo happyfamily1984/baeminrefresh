@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.29.0 (versionCode 59)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.30.0 (versionCode 60)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -39,11 +39,12 @@
 | `FolderPickerActivity.kt` | 폴더 더블탭 시 뜨는 투명 앱 선택 창(여러 앱 체크 → 스티커로 만들어 폴더에 넣음) |
 | `TargetApps.kt` | 실행 가능한 앱 목록, 배민커넥트/카카오 T 픽커 감지 점수 |
 | `DiaryLink.kt` | 일기장 앱(`io.github.happyfamily1984.diary`, 저장소 `happyfamily1984/diary-app`) 연결: 명령 보내기(provider call), 화면 열기 인텐트 |
+| `ReplyAi.kt` | 답변 추천: APK에 암호화되어 든 제미나이 키 풀기(`unlock`), 모델·키 순차 시도(`suggest`), 프롬프트 |
 | `BootReceiver.kt`, `Features.kt` | 부팅 시 자동 시작 / 기능 플래그 |
 
 ### 꼭 알아둘 설계 규칙
 
-- **버튼 키 체계(폴더용)**: `"main"`(기본 재시작) · `"rapp:<pkg>"` · `"sticker:<pkg>"` · `"capture"` · `"voice"` · `"pee"` · `"optimize"` · `"diary"` · `"idea"`(일기장 쓰기). 통화 증폭 버튼(`callBoost`)은 통화 중에만 뜨는 임시 버튼이라 폴더 불가. 새 버튼을 추가하면 `Bubble.key`, `validFolderKeys()`, `addBubbleByKey()`, `Prefs.savedPosOfKey/setSavedPosOfKey`, `savedPosOf`, `savePositionAt`, `onBubbleTapped`, `onLongPress`, `applyAppearance`, `buildAll`, 폴더 만들기 목록(`MainActivity.showFolderCreator`)을 모두 손봐야 한다.
+- **버튼 키 체계(폴더용)**: `"main"`(기본 재시작) · `"rapp:<pkg>"` · `"sticker:<pkg>"` · `"capture"` · `"voice"` · `"pee"` · `"optimize"` · `"diary"` · `"idea"`(일기장 쓰기) · `"reply"`(답변 추천). 통화 증폭 버튼(`callBoost`)은 통화 중에만 뜨는 임시 버튼이라 폴더 불가. 새 버튼을 추가하면 `Bubble.key`, `validFolderKeys()`, `addBubbleByKey()`, `Prefs.savedPosOfKey/setSavedPosOfKey`, `savedPosOf`, `savePositionAt`, `onBubbleTapped`, `onLongPress`, `applyAppearance`, `buildAll`, 폴더 만들기 목록(`MainActivity.showFolderCreator`)을 모두 손봐야 한다.
 - **재진입 주의**: prefs 리스너(`onSharedPreferenceChanged`)는 메인 스레드에서 **동기**로 `buildAll()`을 부른다. `buildAll()` 안에서 prefs를 쓰면 중첩 재구성이 일어나므로, 정리 저장은 `peeHandler.post{}`로 미룬다(`refreshFolders` 참고).
 - **폴더**: 닫힌 폴더의 멤버는 `hiddenByFolder(key)`로 각 `addXxxBubble()` 맨 앞에서 건너뜀. 펼치면 멤버 버블을 만들고 `layoutFolder()`가 폴더 바로 아래(공간 없으면 위)에 세로로 세움. 펼친 멤버는 `inFolder>=0`이라 위치 저장 안 함, 세로로만 끌어 순서 변경(`reorderFolderMember`). 폴더 탭 0.28초 지연 후 더블탭 판정. 길게 0.6초=반응, 1.5초=폴더 풀기(`dissolveFolder`).
 - **오버레이**: 접근성 연결 시 `TYPE_ACCESSIBILITY_OVERLAY`(통화 화면 위에도 보임), 아니면 `TYPE_APPLICATION_OVERLAY`. `refreshOverlayType()`.
@@ -66,6 +67,9 @@
   - 연결 중(`hosted`)에는 일기장 앱의 자기 버튼이 숨겨지고, 기능을 끄거나 플로팅 서비스가 끝나면 `detach`로 되돌린다.
   - 일기장 앱의 녹음 서비스가 꺼져 있으면(재부팅 직후 등) `toggle`이 `need_open`을 돌려주고, 일기장 앱 화면을 `record` extra로 잠깐 열어 녹음을 시작한 뒤 뒤로 물러난다(마이크 포그라운드 서비스는 앱이 보일 때만 시작 가능).
   - 폰 최적화: 기능이 켜져 있으면 일기장 앱은 항상 보호.
+- 1.30.0 실험실 **답변 추천**(청록 💬버튼, 진행 중 노랑): 텔레그램·카카오톡 대화방에서 탭 → 접근성(`readChat`)으로 화면 글자를 위→아래로 읽음(말풍선 위치로 `[오른쪽]`=나/`[왼쪽]`=상대 표시, 입력창 아래는 제외) → 제미나이 → 입력창 글을 통째로 교체(`setChatInput`, 전송 안 함). 같은 화면에서 다시 누르면 앞의 추천(최대 5개)과 다른 답. 입력창에 쓰던 글은 초안으로 넘김. 길게=버튼 삭제. 아이콘 간격 최대 30→120.
+  - **키 보관**: GitHub Secret `GEMINI_API_KEYS`(여러 개는 줄바꿈·쉼표) + `GEMINI_KEYS_PASSWORD`. `app/build.gradle.kts`가 빌드 때 PBKDF2(30만 회)+AES-GCM으로 암호화해 `BuildConfig.GEMINI_KEYS_ENC`에 넣는다(저장소·APK가 공개라 평문 금지). 폰에서는 실험실 카드에 비밀번호를 한 번 입력(Prefs에 저장). Secret이 없으면 빈 문자열 → 기능이 "키 없음"으로 안내. **비밀번호·키를 저장소/커밋/문서에 적지 말 것.**
+  - 모델 순서(`ReplyAi.MODELS`, 사용자 지정): `gemini-3.1-flash-lite` → `gemini-3.5-flash-lite` → `gemini-flash-lite-latest` → `gemini-3.8-flash`. 404·기타 400=다음 모델, 401/403/429/5xx·키 오류=다음 키. 마지막에 성공한 조합을 먼저 시도.
 
 ## 4. 기기 검증 상태 (중요)
 
@@ -77,6 +81,7 @@
   4. **카카오 T 픽커 자동 닫기** 1.23.2(수락 버튼 팝업 대응) 결과.
   5. 음성 "오프라인 우선" 옵션이 체감에 도움이 되는지.
   6. **일기장 쓰기(1.29.0)**: 탭 녹음/색 변화, 재부팅 뒤 첫 탭(일기장 앱이 잠깐 열렸다 닫힘), 길게 누르기, 일기장 앱 자기 버튼 숨김/복귀.
+  7. **답변 추천(1.30.0)**: 텔레그램/카톡에서 대화가 제대로 읽히는지(특히 텔레그램은 말풍선을 직접 그려서 접근성 글자가 다를 수 있음), 나/상대 구분, 입력창 교체, 답변 품질·속도, 실패 시 토스트 문구.
 
 ## 5. 알려진 한계 · 사용자에게 이미 설명한 것
 

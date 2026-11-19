@@ -174,12 +174,24 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_DIARY_ENABLED, false)
         set(value) = sp.edit().putBoolean(KEY_DIARY_ENABLED, value).apply()
 
-    /** kind = "diary" 또는 "idea" */
+    /** kind = "diary" · "idea" · "reply"(답변 추천 버튼) */
     fun diaryPos(kind: String): Pair<Int, Int> =
         sp.getInt("${kind}_btn_pos_x", -1) to sp.getInt("${kind}_btn_pos_y", -1)
 
     fun setDiaryPos(kind: String, x: Int, y: Int) =
         sp.edit().putInt("${kind}_btn_pos_x", x).putInt("${kind}_btn_pos_y", y).apply()
+
+    // ---------------- 답변 추천 (실험실) ----------------
+
+    /** 켜면 플로팅 💬버튼이 뜬다 (텔레그램·카카오톡 대화를 읽고 답장을 입력창에 넣음) */
+    var replyEnabled: Boolean
+        get() = sp.getBoolean(KEY_REPLY_ENABLED, false)
+        set(value) = sp.edit().putBoolean(KEY_REPLY_ENABLED, value).apply()
+
+    /** APK 에 암호화되어 들어 있는 API 키를 푸는 비밀번호 (이 폰에만 저장) */
+    var replyPassword: String
+        get() = sp.getString(KEY_REPLY_PASSWORD, "") ?: ""
+        set(value) = sp.edit().putString(KEY_REPLY_PASSWORD, value).apply()
 
     var optPosX: Int
         get() = sp.getInt(KEY_OPT_X, -1)
@@ -369,7 +381,7 @@ class Prefs(context: Context) {
         key == "voice" -> voicePosX to voicePosY
         key == "pee" -> peePosX to peePosY
         key == "optimize" -> optPosX to optPosY
-        key == "diary" || key == "idea" -> diaryPos(key)
+        key == "diary" || key == "idea" || key == "reply" -> diaryPos(key)
         key.startsWith("rapp:") -> getRestartApps().firstOrNull { it.packageName == key.removePrefix("rapp:") }
             ?.let { it.x to it.y } ?: (-1 to -1)
         key.startsWith("sticker:") -> getStickers().firstOrNull { it.packageName == key.removePrefix("sticker:") }
@@ -384,7 +396,7 @@ class Prefs(context: Context) {
             key == "voice" -> { voicePosX = x; voicePosY = y }
             key == "pee" -> { peePosX = x; peePosY = y }
             key == "optimize" -> { optPosX = x; optPosY = y }
-            key == "diary" || key == "idea" -> setDiaryPos(key, x, y)
+            key == "diary" || key == "idea" || key == "reply" -> setDiaryPos(key, x, y)
             key.startsWith("rapp:") -> updateRestartAppPosition(key.removePrefix("rapp:"), x, y)
             key.startsWith("sticker:") -> updateStickerPosition(key.removePrefix("sticker:"), x, y)
         }
@@ -407,6 +419,8 @@ class Prefs(context: Context) {
         const val KEY_OPT_X = "opt_pos_x"
         const val KEY_OPT_Y = "opt_pos_y"
         const val KEY_DIARY_ENABLED = "lab_diary_enabled"
+        const val KEY_REPLY_ENABLED = "lab_reply_enabled"
+        const val KEY_REPLY_PASSWORD = "lab_reply_password"
         const val KEY_OPT_ADD = "opt_protect_add"
         const val KEY_OPT_REMOVE = "opt_protect_remove"
         const val KEY_VOICE_OFFLINE = "voice_offline"
@@ -445,7 +459,7 @@ class Prefs(context: Context) {
         const val MAX_SIZE_DP = 100
         const val DEFAULT_SIZE_DP = 40
         const val SIZE_SMALL_DP = 30
-        const val MAX_GAP_DP = 30
+        const val MAX_GAP_DP = 120
         const val DEFAULT_GAP_DP = 2
         const val KEY_GAP = "button_gap_dp"
         const val SIZE_LARGE_DP = 50

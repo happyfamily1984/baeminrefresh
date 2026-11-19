@@ -1,6 +1,31 @@
+import java.security.SecureRandom
+import java.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// 답변 추천(실험실)용 제미나이 API 키: GitHub Secret GEMINI_API_KEYS(여러 개는 줄바꿈·쉼표로 구분)를
+// GEMINI_KEYS_PASSWORD 로 암호화해서 넣는다. APK 에는 암호문만 들어가고, 폰에서 비밀번호를 입력해야 풀린다.
+// (형식: base64(salt 16 + iv 12 + AES-GCM 암호문) — ReplyAi.unlock 과 같아야 한다)
+fun encryptedGeminiKeys(): String {
+    val keys = (System.getenv("GEMINI_API_KEYS") ?: "").trim()
+    val pass = (System.getenv("GEMINI_KEYS_PASSWORD") ?: "").trim()
+    if (keys.isEmpty() || pass.isEmpty()) return ""
+    val rnd = SecureRandom()
+    val salt = ByteArray(16).also { rnd.nextBytes(it) }
+    val iv = ByteArray(12).also { rnd.nextBytes(it) }
+    val key = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        .generateSecret(PBEKeySpec(pass.toCharArray(), salt, 300_000, 256)).encoded
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+    return Base64.getEncoder().encodeToString(salt + iv + cipher.doFinal(keys.toByteArray(Charsets.UTF_8)))
 }
 
 android {
@@ -11,8 +36,9 @@ android {
         applicationId = "com.baeminrefresh.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 59
-        versionName = "1.29.0"
+        versionCode = 60
+        versionName = "1.30.0"
+        buildConfigField("String", "GEMINI_KEYS_ENC", "\"${encryptedGeminiKeys()}\"")
     }
 
     // 릴리스 서명 키는 저장소에 두지 않고, CI가 GitHub Secret에서 꺼내 경로를 넘겨준다.
@@ -39,6 +65,10 @@ android {
                 signingConfigs.getByName("debug")
             }
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {

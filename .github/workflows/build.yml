@@ -30,6 +30,9 @@ jobs:
       - name: Build release APK
         env:
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          # 답변 추천(실험실): 제미나이 API 키(여러 개는 줄바꿈·쉼표)와 그 키를 잠그는 비밀번호. 없으면 기능만 꺼진다.
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          GEMINI_KEYS_PASSWORD: ${{ secrets.GEMINI_KEYS_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk BaeminRefresh.apk

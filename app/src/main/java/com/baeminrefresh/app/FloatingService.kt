@@ -56,6 +56,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val optimize: Boolean = false,
         /** 일기장 버튼: "diary"(📖 일기) 또는 "idea"(💡 아이디어) */
         val diary: String? = null,
+        /** 답변 추천 버튼 (텔레그램·카카오톡) */
+        val reply: Boolean = false,
     ) {
         /** 펼쳐진 폴더 안에 보이는 중이면 그 폴더 id (끌기 불가, 폴더 옆에 자동 배치) */
         var inFolder: Int = -1
@@ -69,6 +71,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             voice -> "voice"
             optimize -> "optimize"
             diary != null -> diary
+            reply -> "reply"
             restartPkg != null -> "rapp:$restartPkg"
             restart -> "main"
             launchPkg != null -> "sticker:$launchPkg"
@@ -209,6 +212,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
             Prefs.KEY_STICKERS -> rebuildStickers()
             Prefs.KEY_RESTART_APPS, Prefs.KEY_FOLDERS, Prefs.KEY_OPT_ENABLED -> buildAll()
+            Prefs.KEY_REPLY_ENABLED -> buildAll()
             Prefs.KEY_DIARY_ENABLED -> {
                 diaryAttach(prefs.diaryEnabled)
                 buildAll()
@@ -291,6 +295,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             addDiaryBubble(DiaryLink.KIND_DIARY)
             addDiaryBubble(DiaryLink.KIND_IDEA)
         }
+        if (!waterOnly() && prefs.replyEnabled) addReplyBubble()
         if (callBubbleWanted()) addCallBubble()
         layoutExpandedFolders()
         updatePeeState()
@@ -490,6 +495,106 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
+    // ---------------- 답변 추천 버튼 (실험실) ----------------
+    // 탭 → 접근성으로 텔레그램·카카오톡 화면의 대화를 읽고 → 제미나이로 답장을 받아 → 입력창에 넣는다(전송 안 함).
+    // 같은 대화에서 한 번 더 누르면 앞의 추천과 다른 답장으로 바꾼다.
+
+    private var replyBusy = false
+    private var replyCtx = ""
+    private val replyPrev = mutableListOf<String>()
+
+    private fun addReplyBubble() {
+        if (bubbles.any { it.reply } || hiddenByFolder("reply")) return
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(reply = true)
+        b.iv = ImageView(this).apply {
+            setImageResource(R.drawable.ic_chat)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        b.frame = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setStroke(dp(2), 0xFFFFFFFF.toInt())
+            }
+            elevation = dp(6).toFloat()
+            addView(b.iv, FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER))
+        }
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+        styleReply()
+        val (sx, sy) = savedPosOf(b)
+        val (cx, cy) = resolveCollision(b, sx, sy)
+        clampAndApply(b, cx, cy)
+    }
+
+    /** 평소 청록 → 답변을 만드는 중 노랑 */
+    private fun styleReply() {
+        val b = bubbles.firstOrNull { it.reply } ?: return
+        (b.frame.background as? GradientDrawable)?.setColor(if (replyBusy) OPT_RUNNING_COLOR else REPLY_COLOR)
+    }
+
+    private fun longToast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+
+    private fun onReplyTapped() {
+        if (replyBusy) {
+            toast("답변을 만드는 중이에요")
+            return
+        }
+        val ax = RestartAccessibilityService.instance
+        if (ax == null) {
+            longToast("접근성을 켜야 대화를 읽을 수 있어요 (배민리프레시 앱에서 켜 주세요)")
+            return
+        }
+        if (!ReplyAi.hasBundledKeys()) {
+            longToast("이 빌드에는 API 키가 들어 있지 않아요")
+            return
+        }
+        val pw = prefs.replyPassword
+        if (pw.isEmpty()) {
+            longToast("배민리프레시 앱 실험실의 '답변 추천'에서 비밀번호를 먼저 입력해 주세요")
+            return
+        }
+        val chat = ax.readChat()
+        if (chat == null) {
+            longToast("텔레그램이나 카카오톡 대화방을 연 상태에서 눌러 주세요")
+            return
+        }
+        if (chat.text.isBlank()) {
+            toast("화면에서 대화 내용을 찾지 못했어요")
+            return
+        }
+        // 같은 대화 화면이면 앞의 추천을 기억해 두고 이번에는 다르게 받는다
+        val ctx = chat.pkg + ":" + chat.text.takeLast(300).hashCode()
+        if (ctx != replyCtx) {
+            replyCtx = ctx
+            replyPrev.clear()
+        }
+        val draft = if (chat.draft in replyPrev) "" else chat.draft // 입력창에 남은 지난 추천은 초안이 아님
+        val prev = replyPrev.toList()
+        replyBusy = true
+        styleReply()
+        Thread {
+            val r = ReplyAi.suggest(pw, chat.pkg, chat.text, draft, prev)
+            peeHandler.post {
+                replyBusy = false
+                styleReply()
+                if (!isRunning) return@post
+                val text = r.text
+                if (text == null) {
+                    longToast(r.error ?: "답변을 받지 못했어요")
+                    return@post
+                }
+                replyPrev.add(text)
+                if (replyPrev.size > 5) replyPrev.removeAt(0)
+                val ok = RestartAccessibilityService.instance?.setChatInput(text) == true
+                if (!ok) longToast("입력창을 찾지 못했어요")
+            }
+        }.start()
+    }
+
     // ---------------- 폴더 ----------------
 
     private fun validFolderKeys(): Set<String> = buildSet {
@@ -503,6 +608,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             add(DiaryLink.KIND_DIARY)
             add(DiaryLink.KIND_IDEA)
         }
+        if (prefs.replyEnabled) add("reply")
         if (Features.PEE && prefs.peeTrackerEnabled) add("pee")
     }
 
@@ -607,6 +713,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             key == "capture" -> addCaptureBubble()
             key == "voice" -> addVoiceBubble()
             key == "optimize" -> addOptimizeBubble()
+            key == "reply" -> if (prefs.replyEnabled) addReplyBubble()
             key == DiaryLink.KIND_DIARY || key == DiaryLink.KIND_IDEA -> if (prefs.diaryEnabled) addDiaryBubble(key)
             key == "pee" -> addPeeBubble()
         }
@@ -1627,7 +1734,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             // 글자만 있는 버튼
         } else if (b.diary != null) {
             b.tv?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sizePx * 0.45f)
-        } else if (b.capture || b.voice || b.isFolder || b.optimize) {
+        } else if (b.capture || b.voice || b.isFolder || b.optimize || b.reply) {
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER)
         } else {
             // 기본 재시작(배민)은 작은 아이콘, 앱 스티커/앱 재시작은 아이콘이 꽉 차게
@@ -1677,6 +1784,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                     val size = dp(prefs.buttonSizeDp)
                     val step = if (b.diary == DiaryLink.KIND_IDEA) size + dp(prefs.buttonGapDp) else 0
                     (w - size) to ((h * 0.2f).roundToInt() + step)
+                } else x to y
+            }
+            b.reply -> {
+                val (x, y) = prefs.diaryPos("reply")
+                if (x < 0 || y < 0) {
+                    val (w, h) = screenSize()
+                    (w - dp(prefs.buttonSizeDp)) to (h * 0.5f).roundToInt()
                 } else x to y
             }
             b.optimize -> {
@@ -1896,6 +2010,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 prefs.optimizeEnabled = false
                 toast("폰 최적화 버튼을 지웠어요")
             }
+            b.reply -> {
+                prefs.replyEnabled = false
+                toast("답변 추천 버튼을 지웠어요")
+            }
             b.capture -> {
                 prefs.captureButtonEnabled = false
                 toast("화면 캡쳐 버튼을 지웠어요")
@@ -1920,6 +2038,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         when {
             b.isFolder -> prefs.updateFolderPosition(b.folderId, x, y)
             b.diary != null -> prefs.setDiaryPos(b.diary, x, y)
+            b.reply -> prefs.setDiaryPos("reply", x, y)
             b.optimize -> {
                 prefs.optPosX = x
                 prefs.optPosY = y
@@ -2069,6 +2188,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.callBoost -> onCallBubbleTapped()
             b.optimize -> onOptimizeTapped()
             b.diary != null -> onDiaryTapped(b.diary)
+            b.reply -> onReplyTapped()
             b.isRestart -> onRestartTapped(b)
             else -> launchApp(b.launchPkg!!)
         }
@@ -2177,6 +2297,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val FOLDER_DISSOLVE_MS = 1500L // 폴더는 이만큼 눌러야 풀린다
         private const val DOUBLE_TAP_MS = 280L // 이 안에 한 번 더 누르면 더블탭
         private val FOLDER_COLOR = 0xFF5B6770.toInt()
+        private val REPLY_COLOR = 0xFF0F9D8A.toInt() // 답변 추천: 청록
         private val DIARY_COLOR = 0xFF7C5CFF.toInt() // 📖 평소: 보라
         private val IDEA_COLOR = 0xFFF59F00.toInt() // 💡 평소: 주황
         private val DIARY_REC_COLOR = 0xFFE03131.toInt() // 녹음 중: 빨강
