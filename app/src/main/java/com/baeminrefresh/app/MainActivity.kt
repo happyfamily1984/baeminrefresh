@@ -134,6 +134,7 @@ class MainActivity : AppCompatActivity() {
             waterModeSwitch.isChecked = prefs.waterModeEnabled
             waterModeSwitch.setOnCheckedChangeListener { _, checked ->
                 prefs.waterModeEnabled = checked
+                refreshKeepAlive()
                 if (checked && !prefs.peeTrackerEnabled) {
                     Toast.makeText(this, "워터 타이머를 켜야 물방울 버튼이 나와요", Toast.LENGTH_LONG).show()
                 }
@@ -815,6 +816,7 @@ class MainActivity : AppCompatActivity() {
         val sw = findViewById<MaterialSwitch>(R.id.keep_switch)
         sw.isChecked = prefs.keepAliveEnabled
         sw.setOnCheckedChangeListener { _, checked ->
+            if (checked == prefs.keepAliveEnabled) return@setOnCheckedChangeListener // 화면 새로 고칠 때
             prefs.keepAliveEnabled = checked
             if (checked && !FloatingService.isRunning) {
                 Toast.makeText(this, "위에서 '플로팅 버튼 표시'가 켜져 있어야 지켜볼 수 있어요", Toast.LENGTH_LONG).show()
@@ -849,6 +851,23 @@ class MainActivity : AppCompatActivity() {
                 safeStart(Intent(Settings.ACTION_SETTINGS))
             }
         }
+        findViewById<MaterialButton>(R.id.keep_log_button).setOnClickListener {
+            val text = KeepAlive.logText(this)
+            AlertDialog.Builder(this)
+                .setTitle("배민커넥트 꺼짐 기록")
+                .setMessage(text)
+                .setPositiveButton("닫기", null)
+                .setNeutralButton("복사") { _, _ ->
+                    val cm = getSystemService(android.content.ClipboardManager::class.java)
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("keepalive log", text))
+                    Toast.makeText(this, "복사했어요", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("지우기") { _, _ ->
+                    prefs.keepAliveLog = "[]"
+                    refreshKeepAlive()
+                }
+                .show()
+        }
         findViewById<MaterialButton>(R.id.keep_usage_button).setOnClickListener {
             val withPkg = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:$packageName"))
             if (!safeStart(withPkg, showError = false)) safeStart(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
@@ -858,6 +877,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshKeepAlive() {
         val status = findViewById<TextView>(R.id.keep_status) ?: return
+        // 워터 모드를 켜고 끄면 꺼짐 방지도 같이 바뀌므로 스위치를 맞춘다
+        findViewById<MaterialSwitch>(R.id.keep_switch)?.let { if (it.isChecked != prefs.keepAliveEnabled) it.isChecked = prefs.keepAliveEnabled }
         val pkg = prefs.targetPackage
         val pm = getSystemService(PowerManager::class.java)
         val lines = ArrayList<String>()
@@ -880,6 +901,8 @@ class MainActivity : AppCompatActivity() {
                     java.text.SimpleDateFormat("M월 d일 HH:mm", java.util.Locale.KOREA).format(java.util.Date(last))
             }
         }
+        if (Features.PEE) lines += "💧 워터 모드를 켜면 같이 켜지고, 끄면 같이 꺼져요"
+        lines += KeepAlive.logSummary(this)
         status.text = lines.joinToString("\n")
     }
 

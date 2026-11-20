@@ -1147,6 +1147,13 @@
                         android:text="삼성 절전 예외 앱 설정" />
 
                     <com.google.android.material.button.MaterialButton
+                        android:id="@+id/keep_log_button"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="📋 꺼짐 기록 보기" />
+
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/keep_usage_button"
                         style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="match_parent"

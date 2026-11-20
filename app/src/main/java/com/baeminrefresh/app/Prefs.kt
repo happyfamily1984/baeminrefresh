@@ -118,9 +118,10 @@ class Prefs(context: Context) {
         set(value) = sp.edit().putLong(KEY_PEE_LAST, value).apply()
 
     /** 워터 모드: 켜면 다른 플로팅 버튼은 숨기고 물방울 버튼만 남긴다 */
+    /** 워터 모드. 켜고 끌 때 '배민커넥트 꺼짐 방지'도 같이 켜고 끈다 (사용자 요청 1.33.0) */
     var waterModeEnabled: Boolean
         get() = sp.getBoolean(KEY_WATER_MODE, false)
-        set(value) = sp.edit().putBoolean(KEY_WATER_MODE, value).apply()
+        set(value) = sp.edit().putBoolean(KEY_WATER_MODE, value).putBoolean(KEY_KEEPALIVE_ENABLED, value).apply()
 
     /** 기본 배민커넥트 재시작 버튼 표시 여부 (설정에서 켜고 끔) */
     var showMainRestart: Boolean
@@ -204,6 +205,11 @@ class Prefs(context: Context) {
     var keepAliveReturn: Boolean
         get() = sp.getBoolean("lab_keepalive_return", true)
         set(value) = sp.edit().putBoolean("lab_keepalive_return", value).apply()
+
+    /** 꺼짐 기록 (JSON 배열, 최근 것이 뒤, 최대 60개) */
+    var keepAliveLog: String
+        get() = sp.getString("lab_keepalive_log", "[]") ?: "[]"
+        set(value) = sp.edit().putString("lab_keepalive_log", value).apply()
 
     var keepAliveLastRelaunch: Long
         get() = sp.getLong("lab_keepalive_last", 0L)
