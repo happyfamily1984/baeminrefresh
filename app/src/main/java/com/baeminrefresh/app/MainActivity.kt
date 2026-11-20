@@ -901,7 +901,7 @@ class MainActivity : AppCompatActivity() {
                     java.text.SimpleDateFormat("M월 d일 HH:mm", java.util.Locale.KOREA).format(java.util.Date(last))
             }
         }
-        if (Features.PEE) lines += "💧 워터 모드를 켜면 같이 켜지고, 끄면 같이 꺼져요"
+        if (Features.PEE) lines += "💧 워터 모드를 켜면(배달 끝) 꺼지고, 끄면(배달 중) 켜져요"
         lines += KeepAlive.logSummary(this)
         status.text = lines.joinToString("\n")
     }

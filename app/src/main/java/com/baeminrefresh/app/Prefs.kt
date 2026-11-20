@@ -118,10 +118,13 @@ class Prefs(context: Context) {
         set(value) = sp.edit().putLong(KEY_PEE_LAST, value).apply()
 
     /** 워터 모드: 켜면 다른 플로팅 버튼은 숨기고 물방울 버튼만 남긴다 */
-    /** 워터 모드. 켜고 끌 때 '배민커넥트 꺼짐 방지'도 같이 켜고 끈다 (사용자 요청 1.33.0) */
+    /**
+     * 워터 모드. 켜면 배달을 끝낸 것이라 '배민커넥트 꺼짐 방지'를 끄고, 끄면 배달 중이라 꺼짐 방지를 켠다
+     * (반대로 움직임, 사용자 요청 1.33.1)
+     */
     var waterModeEnabled: Boolean
         get() = sp.getBoolean(KEY_WATER_MODE, false)
-        set(value) = sp.edit().putBoolean(KEY_WATER_MODE, value).putBoolean(KEY_KEEPALIVE_ENABLED, value).apply()
+        set(value) = sp.edit().putBoolean(KEY_WATER_MODE, value).putBoolean(KEY_KEEPALIVE_ENABLED, !value).apply()
 
     /** 기본 배민커넥트 재시작 버튼 표시 여부 (설정에서 켜고 끔) */
     var showMainRestart: Boolean

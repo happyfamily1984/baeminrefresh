@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.33.0 (versionCode 64)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.33.1 (versionCode 65)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -75,7 +75,7 @@
 - 1.31.1 스레드: 아이디 칸이 정확히 같은 글자가 아닐 때("아이디 16시간"처럼 붙은 칸, 설명(contentDescription)에만 있는 아이디, 아이디·본문이 한 칸에 합쳐진 경우)도 찾게 함. 그래도 못 찾으면 토스트에 "화면에서 찾은 글자: …"(입력칸 위쪽 8개)를 보여 줌 → 사용자가 보내 주면 그 형태에 맞추면 된다.
 - 1.32.0 실험실 **배민커넥트 꺼짐 방지**(🛡️ 카드). A: 배민커넥트·배민리프레시 배터리 최적화 상태 표시(`isIgnoringBatteryOptimizations(pkg)`), 앱 정보(배터리→제한 없음)·삼성 절전 예외(`com.samsung.android.lool` BatteryActivity, 안 되면 최적화 목록)·사용 기록 접근 바로가기. B(토글): `KeepAlive`가 FloatingService와 함께 돌며 15초마다 ① FLAG_STOPPED가 false→true ② UsageEvents FOREGROUND_SERVICE_STOP이 배민커넥트 화면 밖에서 발생(그 뒤 다시 START 없음) 이면 런치 인텐트로 다시 켜고 1.8초 뒤 보던 앱(`resumeApp`, 런처면 홈)으로. 화면 꺼짐·잠금이면 복귀 생략. 우리 재시작(`onRestartTapped`, 접근성 `setState`→`lastBusyAt`)·폰 최적화 중/직후 45초, 설정 앱이 앞에 있을 때는 안 함. 1분 1회·30분 6회 넘으면 "배터리 설정 확인" 토스트.
 
-- 1.33.0 **꺼짐 기록**: `KeepAlive`가 토글과 상관없이(플로팅 서비스 동안) 꺼짐을 감지할 때마다 시각·종류(강제 중지됨/상시 알림 멈춤)·보던 앱·남은 메모리(부족 여부)·화면·배터리·절전 모드·처리 결과를 `Prefs.keepAliveLog`(JSON, 최대 60개)에 남김. 카드에 요약, "📋 꺼짐 기록 보기"(복사·지우기). **워터 모드 연동**: `Prefs.waterModeEnabled` setter가 `KEY_KEEPALIVE_ENABLED`도 같은 값으로 저장(켜면 켜지고 끄면 꺼짐). 꺼짐 방지 토글을 따로 바꾸는 것도 가능.
+- 1.33.0 **꺼짐 기록**: `KeepAlive`가 토글과 상관없이(플로팅 서비스 동안) 꺼짐을 감지할 때마다 시각·종류(강제 중지됨/상시 알림 멈춤)·보던 앱·남은 메모리(부족 여부)·화면·배터리·절전 모드·처리 결과를 `Prefs.keepAliveLog`(JSON, 최대 60개)에 남김. 카드에 요약, "📋 꺼짐 기록 보기"(복사·지우기). **워터 모드 연동**(1.33.1에서 반대로 바꿈): `Prefs.waterModeEnabled` setter가 `KEY_KEEPALIVE_ENABLED`를 **반대 값**으로 저장 — 워터 모드 켬=배달 끝 → 꺼짐 방지 끔, 워터 모드 끔=배달 중 → 꺼짐 방지 켬. 꺼짐 방지 토글을 따로 바꾸는 것도 가능.
 
 ## 4. 기기 검증 상태 (중요)
 
