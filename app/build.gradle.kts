@@ -36,8 +36,8 @@ android {
         applicationId = "com.baeminrefresh.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 62
-        versionName = "1.31.1"
+        versionCode = 63
+        versionName = "1.32.0"
         buildConfigField("String", "GEMINI_KEYS_ENC", "\"${encryptedGeminiKeys()}\"")
     }
 

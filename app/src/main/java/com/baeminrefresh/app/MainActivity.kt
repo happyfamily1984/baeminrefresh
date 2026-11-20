@@ -114,6 +114,7 @@ class MainActivity : AppCompatActivity() {
         setupOptimizer()
         setupDiary()
         setupReply()
+        setupKeepAlive()
 
         if (Features.PEE) {
             findViewById<View>(R.id.pee_card).visibility = View.VISIBLE
@@ -145,6 +146,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshReplyDebug()
+        refreshKeepAlive()
         if (prefs.targetPackage == null) {
             TargetApps.detectBaeminConnect(this)?.let { prefs.targetPackage = it.packageName }
         }
@@ -805,6 +807,80 @@ class MainActivity : AppCompatActivity() {
     private val optimizerListener = object : PhoneOptimizer.Listener {
         override fun onProgress(done: Int, total: Int) = refreshOptimizer()
         override fun onFinished() = refreshOptimizer()
+    }
+
+    // ---------------- 배민커넥트 꺼짐 방지 (실험실) ----------------
+
+    private fun setupKeepAlive() {
+        val sw = findViewById<MaterialSwitch>(R.id.keep_switch)
+        sw.isChecked = prefs.keepAliveEnabled
+        sw.setOnCheckedChangeListener { _, checked ->
+            prefs.keepAliveEnabled = checked
+            if (checked && !FloatingService.isRunning) {
+                Toast.makeText(this, "위에서 '플로팅 버튼 표시'가 켜져 있어야 지켜볼 수 있어요", Toast.LENGTH_LONG).show()
+            }
+            refreshKeepAlive()
+        }
+        val ret = findViewById<MaterialSwitch>(R.id.keep_return_switch)
+        ret.isChecked = prefs.keepAliveReturn
+        ret.setOnCheckedChangeListener { _, checked -> prefs.keepAliveReturn = checked }
+
+        // A: 배민커넥트 배터리 설정 (앱 정보 → 배터리 → '제한 없음')
+        findViewById<MaterialButton>(R.id.keep_battery_button).setOnClickListener {
+            val pkg = prefs.targetPackage
+            if (pkg == null) {
+                Toast.makeText(this, "먼저 위에서 배민커넥트 앱을 골라 주세요", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            Toast.makeText(this, "'배터리' → '제한 없음'을 골라 주세요", Toast.LENGTH_LONG).show()
+            safeStart(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null)))
+        }
+        // A: 삼성 '절전 예외 앱' (안 열리면 배터리 최적화 목록)
+        findViewById<MaterialButton>(R.id.keep_samsung_button).setOnClickListener {
+            Toast.makeText(this, "'백그라운드 사용 제한' → '절전 예외 앱'에 배민커넥트를 넣고, '사용하지 않는 앱을 절전 상태로 전환'은 꺼 주세요", Toast.LENGTH_LONG).show()
+            val samsung = listOf(
+                android.content.ComponentName("com.samsung.android.lool", "com.samsung.android.sm.battery.ui.BatteryActivity"),
+                android.content.ComponentName("com.samsung.android.sm_cn", "com.samsung.android.sm.battery.ui.BatteryActivity"),
+            )
+            val opened = samsung.any { cn ->
+                safeStart(Intent().setComponent(cn).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), showError = false)
+            }
+            if (!opened && !safeStart(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), showError = false)) {
+                safeStart(Intent(Settings.ACTION_SETTINGS))
+            }
+        }
+        findViewById<MaterialButton>(R.id.keep_usage_button).setOnClickListener {
+            val withPkg = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:$packageName"))
+            if (!safeStart(withPkg, showError = false)) safeStart(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        }
+        refreshKeepAlive()
+    }
+
+    private fun refreshKeepAlive() {
+        val status = findViewById<TextView>(R.id.keep_status) ?: return
+        val pkg = prefs.targetPackage
+        val pm = getSystemService(PowerManager::class.java)
+        val lines = ArrayList<String>()
+        if (pkg == null) {
+            lines += "⚠️ 배민커넥트 앱이 선택되지 않았어요."
+        } else {
+            lines += if (KeepAlive.isTargetBatteryFree(this, pkg)) "✅ 배민커넥트: 배터리 최적화에서 빠져 있어요"
+            else "⚠️ 배민커넥트: 배터리 최적화 대상이에요 → 아래 '배민커넥트 배터리 설정'에서 '제한 없음'으로"
+        }
+        lines += if (pm.isIgnoringBatteryOptimizations(packageName)) "✅ 배민리프레시: 배터리 최적화에서 빠져 있어요"
+        else "⚠️ 배민리프레시도 배터리 최적화에서 빼 주세요 (위 '배터리 최적화 제외')"
+        if (prefs.keepAliveEnabled) {
+            lines += if (PhoneOptimizer.isUsageAccessGranted(this)) "✅ 사용 기록 접근 허용됨"
+            else "⚠️ 사용 기록 접근을 허용해야 꺼짐을 잘 알아채요 (강제 중지만 알아챔)"
+            lines += if (RestartAccessibilityService.instance != null) "✅ 접근성 켜짐 (다시 켠 뒤 보던 앱으로 돌아감)"
+            else "⚠️ 접근성이 꺼져 있어 다시 켠 뒤 보던 앱으로 못 돌아가요"
+            val last = prefs.keepAliveLastRelaunch
+            if (last > 0) {
+                lines += "🔁 마지막으로 다시 켠 때: " +
+                    java.text.SimpleDateFormat("M월 d일 HH:mm", java.util.Locale.KOREA).format(java.util.Date(last))
+            }
+        }
+        status.text = lines.joinToString("\n")
     }
 
     private fun refreshReplyDebug() {

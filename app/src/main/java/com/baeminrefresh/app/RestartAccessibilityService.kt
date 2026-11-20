@@ -748,6 +748,7 @@ class RestartAccessibilityService : AccessibilityService() {
 
     private fun setState(s: State) {
         state = s
+        lastBusyAt = SystemClock.elapsedRealtime()
         stateAt = SystemClock.uptimeMillis()
     }
 
@@ -997,6 +998,9 @@ class RestartAccessibilityService : AccessibilityService() {
         @Volatile
         var instance: RestartAccessibilityService? = null
             private set
+        /** 마지막으로 재시작·강제 중지 단계를 밟은 시각(elapsedRealtime) — 꺼짐 방지가 우리 동작에 반응하지 않게 */
+        @Volatile
+        var lastBusyAt = 0L
         const val THREADS_PKG = "com.instagram.barcelona"
         private val THREAD_HINT_KO = Regex("^\\s*(.+?)님에게 답글")
         private val THREAD_HINT_EN = Regex("^\\s*Reply to (.+?)(\\.\\.\\.|…|$)")

@@ -193,6 +193,22 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_REPLY_PASSWORD, "") ?: ""
         set(value) = sp.edit().putString(KEY_REPLY_PASSWORD, value).apply()
 
+    // ---------------- 배민커넥트 꺼짐 방지 (실험실) ----------------
+
+    /** 켜면 배민커넥트가 꺼진 걸 알아채고 다시 켠다 (KeepAlive) */
+    var keepAliveEnabled: Boolean
+        get() = sp.getBoolean(KEY_KEEPALIVE_ENABLED, false)
+        set(value) = sp.edit().putBoolean(KEY_KEEPALIVE_ENABLED, value).apply()
+
+    /** 다시 켠 뒤 보던 앱으로 돌아가기 */
+    var keepAliveReturn: Boolean
+        get() = sp.getBoolean("lab_keepalive_return", true)
+        set(value) = sp.edit().putBoolean("lab_keepalive_return", value).apply()
+
+    var keepAliveLastRelaunch: Long
+        get() = sp.getLong("lab_keepalive_last", 0L)
+        set(value) = sp.edit().putLong("lab_keepalive_last", value).apply()
+
     /** 답변 추천이 글을 못 찾았을 때 화면에서 읽힌 글자 (설정 화면에 보여 주고 사용자가 알려 줄 수 있게) */
     var replyLastDebug: String
         get() = sp.getString("lab_reply_debug", "") ?: ""
@@ -425,6 +441,7 @@ class Prefs(context: Context) {
         const val KEY_OPT_Y = "opt_pos_y"
         const val KEY_DIARY_ENABLED = "lab_diary_enabled"
         const val KEY_REPLY_ENABLED = "lab_reply_enabled"
+        const val KEY_KEEPALIVE_ENABLED = "lab_keepalive_enabled"
         const val KEY_REPLY_PASSWORD = "lab_reply_password"
         const val KEY_OPT_ADD = "opt_protect_add"
         const val KEY_OPT_REMOVE = "opt_protect_remove"

@@ -124,6 +124,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         diaryReceiverOn = true
         if (prefs.diaryEnabled) diaryAttach(true)
         isRunning = true
+        KeepAlive.start(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -171,6 +172,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     override fun onDestroy() {
         isRunning = false
+        KeepAlive.stop()
         if (instance === this) instance = null
         prefs.unregisterListener(this)
         PhoneOptimizer.removeListener(optimizeListener)
@@ -2235,6 +2237,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     // ---------------- 재시작 ----------------
 
     private fun onRestartTapped(b: Bubble) {
+        KeepAlive.pause()
         val pkg = b.restartTarget
         if (pkg == null) {
             toast("먼저 배민리프레시 앱에서 배민커넥트 앱을 선택해 주세요")

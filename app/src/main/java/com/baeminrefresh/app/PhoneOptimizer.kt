@@ -227,6 +227,7 @@ object PhoneOptimizer {
         running = true
         cancelled = false
         lastCompleted = false
+        KeepAlive.pause(10 * 60_000L) // 최적화 중에는 꺼짐 방지가 끼어들지 않게 (끝나면 다시 아래에서 짧게)
         doneCount = 0
         totalCount = 0
 
@@ -260,6 +261,7 @@ object PhoneOptimizer {
             if (uptimeDays() >= REBOOT_ADVICE_DAYS) lines += "재부팅한 지 ${uptimeDays()}일 — 재부팅을 권해요"
             Toast.makeText(app, lines.joinToString("\n"), Toast.LENGTH_LONG).show()
             lastCompleted = !cancelled
+            KeepAlive.pause()
             running = false
             notifyFinished()
         }

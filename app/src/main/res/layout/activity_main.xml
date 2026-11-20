@@ -1062,6 +1062,99 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/card"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="1dp"
+                app:strokeWidth="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="🛡️ 배민커넥트 꺼짐 방지"
+                                android:textColor="@color/text_main"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:lineSpacingExtra="2dp"
+                                android:text="다른 앱을 쓰는 동안 폰이 배민커넥트를 꺼 버리는 걸 줄여요. ① 아래 버튼으로 배터리 절전 설정을 먼저 고쳐 주세요(가장 중요). ② 켜 두면 배민커넥트가 꺼진 걸 알아채고 자동으로 다시 켠 뒤 보던 앱으로 돌아와요(화면이 1~2초 바뀔 수 있어요). 안드로이드는 다른 앱의 종료를 완전히 막을 수 없어요."
+                                android:textColor="@color/text_sub"
+                                android:textSize="13sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/keep_switch"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/keep_status"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:lineSpacingExtra="3dp"
+                        android:textColor="@color/text_main"
+                        android:textSize="13sp" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/keep_return_switch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="다시 켠 뒤 보던 앱으로 돌아가기"
+                        android:textColor="@color/text_main"
+                        android:textSize="14sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/keep_battery_button"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="배민커넥트 배터리 설정 (제한 없음)" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/keep_samsung_button"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="삼성 절전 예외 앱 설정" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/keep_usage_button"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="사용 기록 접근 허용" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
 <com.google.android.material.card.MaterialCardView
                 android:id="@+id/pee_card"
                 android:layout_width="match_parent"
