@@ -154,6 +154,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_VOICE_OFFLINE, false)
         set(value) = sp.edit().putBoolean(KEY_VOICE_OFFLINE, value).apply()
 
+    /** 음성 입력: 녹음해서 제미나이로 받아쓰기(기본). false 면 예전처럼 폰 음성 인식 */
+    var voiceGemini: Boolean
+        get() = sp.getBoolean("voice_gemini", true)
+        set(value) = sp.edit().putBoolean("voice_gemini", value).apply()
+
     // ---------------- 폰 최적화 (실험실) ----------------
 
     /** 켜면 플로팅 최적화 버튼이 뜬다 */

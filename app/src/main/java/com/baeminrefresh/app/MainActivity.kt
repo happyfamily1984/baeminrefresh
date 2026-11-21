@@ -108,6 +108,14 @@ class MainActivity : AppCompatActivity() {
         val voiceOfflineSwitch = findViewById<MaterialSwitch>(R.id.voice_offline_switch)
         voiceOfflineSwitch.isChecked = prefs.voiceOffline
         voiceOfflineSwitch.setOnCheckedChangeListener { _, checked -> prefs.voiceOffline = checked }
+        val voiceGeminiSwitch = findViewById<MaterialSwitch>(R.id.voice_gemini_switch)
+        voiceGeminiSwitch.isChecked = prefs.voiceGemini
+        voiceGeminiSwitch.setOnCheckedChangeListener { _, checked ->
+            prefs.voiceGemini = checked
+            if (checked && prefs.replyPassword.isEmpty()) {
+                Toast.makeText(this, "아래 '답변 추천' 칸에 비밀번호를 먼저 넣어 주세요", Toast.LENGTH_LONG).show()
+            }
+        }
 
         setupKakaoDismiss()
         setupCallBoost()

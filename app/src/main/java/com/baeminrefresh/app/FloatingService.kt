@@ -181,6 +181,11 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         peeHandler.removeCallbacks(peeTick)
         cancelPeeNotification()
         voiceWanted = false
+        gemRecorder?.let { r ->
+            runCatching { r.stop() }
+            runCatching { r.release() }
+        }
+        gemRecorder = null
         unmuteBeep()
         runCatching { recognizer?.destroy() }
         recognizer = null
@@ -237,7 +242,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     // ---------------- 알림 / 포그라운드 ----------------
 
-    private fun startAsForeground() {
+    /** withMic: 녹음하는 동안 '마이크 사용' 포그라운드 서비스로 올려 다른 앱 위에서도 녹음되게 */
+    private fun startAsForeground(withMic: Boolean = false) {
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(
@@ -267,6 +273,14 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else 0
+        if (withMic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val ok = runCatching {
+                ServiceCompat.startForeground(
+                    this, NOTIFICATION_ID, notification, type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            }.isSuccess
+            if (ok) return
+        }
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
     }
 
@@ -1115,12 +1129,24 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         b.frame = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(if (voiceWanted) VOICE_COLOR_ACTIVE else VOICE_COLOR)
+                setColor(if (voiceWanted || gemRecorder != null) VOICE_COLOR_ACTIVE else VOICE_COLOR)
                 setStroke(dp(2), 0xFFFFFFFF.toInt())
             }
             elevation = dp(6).toFloat()
             addView(b.iv, FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER))
         }
+        // 제미나이 받아쓰기 녹음 중에 경과 시간(분:초)을 보여 줄 글자
+        b.tv = TextView(this).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = (prefs.buttonSizeDp * 0.24f).coerceIn(7f, 14f)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            maxLines = 1
+        }
+        b.frame.addView(b.tv, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER
+        ))
+        if (gemRecorder != null) b.iv.visibility = View.INVISIBLE
         b.lp = newLayoutParams(sizePx)
         b.frame.alpha = prefs.buttonAlpha / 100f
         b.frame.setOnTouchListener(DragTouchListener(b))
@@ -1204,7 +1230,185 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     private fun onVoiceTapped() {
-        if (!voiceWanted) startVoice() else stopVoice()
+        if (voiceWanted) {
+            stopVoice()
+            return
+        }
+        if (gemRecorder != null) {
+            stopGeminiVoice()
+            return
+        }
+        if (gemBusy) {
+            toast("받아쓰는 중이에요. 잠시만요")
+            return
+        }
+        if (prefs.voiceGemini && ReplyAi.hasBundledKeys() && prefs.replyPassword.isNotEmpty()) {
+            // 지난번에 못 보낸 녹음이 있으면 그것부터 받아쓴다
+            val pending = gemPendingFiles()
+            if (pending.isNotEmpty()) {
+                toast("지난번 녹음을 먼저 받아써요")
+                transcribeGemini(pending)
+                return
+            }
+            startGeminiVoice()
+            return
+        }
+        if (prefs.voiceGemini) toast("제미나이 받아쓰기는 '답변 추천' 칸에 비밀번호를 넣어야 해요. 지금은 폰 음성 인식으로 할게요")
+        startVoice()
+    }
+
+    // ---------------- 음성 입력: 녹음 → 임시 파일 → 제미나이 받아쓰기 ----------------
+    // 폰 음성 인식처럼 말이 멈춘다고 끊기지 않고, 다시 누를 때까지 계속 녹음한다(최대 2시간).
+    // 녹음은 앱 안 임시 폴더에 두고, 받아쓰기에 성공하면 지운다. 실패하면 남겨 두고 다음에 누를 때 먼저 다시 보낸다.
+
+    private var gemRecorder: android.media.MediaRecorder? = null
+    private var gemFile: java.io.File? = null
+    private var gemBusy = false
+    private var gemStartedAt = 0L
+    private var gemPeak = 0
+    private val gemTick = object : Runnable {
+        override fun run() {
+            val r = gemRecorder ?: return
+            gemPeak = maxOf(gemPeak, runCatching { r.maxAmplitude }.getOrDefault(0))
+            val sec = ((System.currentTimeMillis() - gemStartedAt) / 1000).toInt()
+            bubbles.firstOrNull { it.voice }?.let { b ->
+                b.iv.visibility = View.INVISIBLE
+                b.tv?.text = String.format(java.util.Locale.US, "%d:%02d", sec / 60, sec % 60)
+            }
+            if (sec >= GEM_MAX_SEC) {
+                toast("2시간이 넘어 녹음을 멈추고 받아써요")
+                stopGeminiVoice()
+                return
+            }
+            peeHandler.postDelayed(this, 500L)
+        }
+    }
+
+    private fun gemDir(): java.io.File = java.io.File(filesDir, "voice_pending").apply { mkdirs() }
+
+    private fun gemPendingFiles(): List<java.io.File> =
+        (gemDir().listFiles { f -> f.name.endsWith(".aac") && f.length() > 0 } ?: emptyArray()).sortedBy { it.name }
+
+    private fun startGeminiVoice() {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            toast("마이크 권한이 필요해요. 앱 설정에서 허용해 주세요")
+            openSettingsScreen()
+            return
+        }
+        if (RestartAccessibilityService.instance == null) {
+            toast("글자 입력에 접근성이 필요해요. 접근성을 켜 주세요")
+            openSettingsScreen()
+            return
+        }
+        runCatching { startAsForeground(withMic = true) }
+        val f = java.io.File(gemDir(), "${System.currentTimeMillis()}.aac")
+        @Suppress("DEPRECATION")
+        val rec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) android.media.MediaRecorder(this)
+        else android.media.MediaRecorder()
+        try {
+            rec.setAudioSource(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION)
+            rec.setOutputFormat(android.media.MediaRecorder.OutputFormat.AAC_ADTS)
+            rec.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+            rec.setAudioChannels(1)
+            rec.setAudioSamplingRate(16000)
+            rec.setAudioEncodingBitRate(32000)
+            rec.setOutputFile(f.absolutePath)
+            rec.prepare()
+            rec.start()
+        } catch (e: Exception) {
+            runCatching { rec.release() }
+            f.delete()
+            runCatching { startAsForeground() }
+            toast("마이크를 쓸 수 없어요 (다른 앱이 쓰는 중일 수 있어요)")
+            return
+        }
+        gemRecorder = rec
+        gemFile = f
+        gemStartedAt = System.currentTimeMillis()
+        gemPeak = 0
+        requestAudioFocus() // 유튜브/음악을 잠깐 멈춰 녹음이 되게
+        setVoiceColor(true)
+        peeHandler.removeCallbacks(gemTick)
+        peeHandler.post(gemTick)
+        toast("🎙 녹음 중… 다 말하면 다시 눌러요 (길이 상관없어요)")
+    }
+
+    private fun stopGeminiVoice() {
+        val rec = gemRecorder ?: return
+        gemRecorder = null
+        peeHandler.removeCallbacks(gemTick)
+        gemPeak = maxOf(gemPeak, runCatching { rec.maxAmplitude }.getOrDefault(0))
+        val stoppedOk = runCatching { rec.stop() }.isSuccess
+        runCatching { rec.release() }
+        abandonAudioFocus()
+        runCatching { startAsForeground() }
+        resetVoiceLook()
+        val f = gemFile
+        gemFile = null
+        val sec = (System.currentTimeMillis() - gemStartedAt) / 1000
+        if (f == null || !stoppedOk || !f.exists() || f.length() == 0L || sec < 1) {
+            f?.delete()
+            toast("녹음이 너무 짧아요")
+            return
+        }
+        if (gemPeak in 1 until GEM_SILENCE_PEAK) {
+            f.delete()
+            toast("말소리가 들리지 않았어요 (다른 앱이 마이크를 쓰는 중일 수도 있어요)")
+            return
+        }
+        transcribeGemini(listOf(f))
+    }
+
+    private fun resetVoiceLook() {
+        setVoiceColor(false)
+        bubbles.firstOrNull { it.voice }?.let { b ->
+            b.tv?.text = ""
+            b.iv.visibility = View.VISIBLE
+        }
+    }
+
+    /** 녹음 파일(들)을 차례로 받아써서 입력창에 넣는다. 성공한 파일은 지운다. */
+    private fun transcribeGemini(files: List<java.io.File>) {
+        gemBusy = true
+        bubbles.firstOrNull { it.voice }?.let { (it.frame.background as? GradientDrawable)?.setColor(OPT_RUNNING_COLOR) }
+        val pw = prefs.replyPassword
+        val hints = VOICE_HINTS.toList()
+        Thread {
+            val texts = ArrayList<String>()
+            var error: String? = null
+            for (f in files) {
+                val r = ReplyAi.transcribe(pw, f, "audio/aac", hints)
+                val t = r.text
+                if (t == null) {
+                    error = r.error
+                    break
+                }
+                if (t.isNotBlank()) texts.add(t.trim())
+                f.delete()
+            }
+            peeHandler.post {
+                gemBusy = false
+                resetVoiceLook()
+                if (!isRunning) return@post
+                if (texts.isNotEmpty()) deliverVoiceText(texts.joinToString(" "))
+                when {
+                    error != null -> toast("$error. 녹음은 남겨 뒀어요, 다음에 누르면 먼저 다시 보내요")
+                    texts.isEmpty() -> toast("알아들을 수 있는 말이 없었어요")
+                }
+            }
+        }.start()
+    }
+
+    /** 받아쓴 글을 입력창에 넣고, 입력창이 없으면 클립보드에 복사 */
+    private fun deliverVoiceText(text: String) {
+        val ok = RestartAccessibilityService.instance?.insertText(text) ?: false
+        if (!ok) {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("voice", text))
+            toast("입력창을 못 찾아 클립보드에 복사했어요")
+        }
     }
 
     private fun startVoice() {
@@ -2335,6 +2539,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         )
         private const val VOICE_IDLE_STOP_MS = 90_000L // 이만큼 말이 없으면 자동 종료
         private const val VOICE_MAX_EMPTY = 8 // 말 없는 구간이 이만큼 연속이면(약 1분) 자동 종료
+        private const val GEM_MAX_SEC = 2 * 60 * 60 // 제미나이 받아쓰기 녹음 최대 2시간
+        private const val GEM_SILENCE_PEAK = 600 // 녹음 내내 이보다 작으면 말소리 없음
         private val VOICE_COLOR_ACTIVE = 0xFFF4323C.toInt() // 녹음 중: 선명한 빨강
 
         @Volatile
