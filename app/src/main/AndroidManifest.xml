@@ -18,6 +18,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 음성 입력: 다른 앱 위에서 직접 녹음(제미나이 받아쓰기) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- 실험실: 화면 녹화 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- 폰 최적화: 백그라운드 앱 정리, 최근 쓴 앱 확인 -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
@@ -60,6 +62,13 @@
             android:theme="@style/Theme.BaeminRefresh.Translucent" />
 
         <activity
+            android:name=".ScreenRecordActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.BaeminRefresh.Translucent" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop">
@@ -72,7 +81,7 @@
         <service
             android:name=".FloatingService"
             android:exported="false"
-            android:foregroundServiceType="specialUse|microphone">
+            android:foregroundServiceType="specialUse|microphone|mediaProjection">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Floating overlay button that restarts a user-selected app" />

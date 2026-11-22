@@ -123,6 +123,7 @@ class MainActivity : AppCompatActivity() {
         setupDiary()
         setupReply()
         setupKeepAlive()
+        setupScreenRec()
 
         if (Features.PEE) {
             findViewById<View>(R.id.pee_card).visibility = View.VISIBLE
@@ -757,6 +758,7 @@ class MainActivity : AppCompatActivity() {
         if (prefs.voiceButtonEnabled) items += "voice" to "음성 입력"
         if (prefs.optimizeEnabled) items += "optimize" to "폰 최적화"
         if (prefs.replyEnabled) items += "reply" to "💬 답변 추천"
+        if (prefs.screenRecEnabled) items += "screenrec" to "⏺ 화면 녹화"
         if (prefs.diaryEnabled) {
             items += DiaryLink.KIND_DIARY to "📖 일기 쓰기"
             items += DiaryLink.KIND_IDEA to "💡 아이디어 쓰기"
@@ -816,6 +818,35 @@ class MainActivity : AppCompatActivity() {
     private val optimizerListener = object : PhoneOptimizer.Listener {
         override fun onProgress(done: Int, total: Int) = refreshOptimizer()
         override fun onFinished() = refreshOptimizer()
+    }
+
+    // ---------------- 화면 녹화 (실험실) ----------------
+
+    private fun setupScreenRec() {
+        val sw = findViewById<MaterialSwitch>(R.id.screenrec_switch)
+        sw.isChecked = prefs.screenRecEnabled
+        sw.setOnCheckedChangeListener { _, checked ->
+            if (checked && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                Toast.makeText(this, "화면 녹화는 안드로이드 10 이상에서 돼요", Toast.LENGTH_LONG).show()
+                sw.isChecked = false
+                return@setOnCheckedChangeListener
+            }
+            prefs.screenRecEnabled = checked
+            if (checked && !FloatingService.isRunning) {
+                Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 ⏺버튼이 나타나요", Toast.LENGTH_LONG).show()
+            }
+        }
+        val mic = findViewById<MaterialSwitch>(R.id.screenrec_mic_switch)
+        mic.isChecked = prefs.screenRecMic
+        mic.setOnCheckedChangeListener { _, checked ->
+            prefs.screenRecMic = checked
+            if (checked && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED
+            ) micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+        val stop = findViewById<MaterialSwitch>(R.id.screenrec_stop_switch)
+        stop.isChecked = prefs.screenRecStopButton
+        stop.setOnCheckedChangeListener { _, checked -> prefs.screenRecStopButton = checked }
     }
 
     // ---------------- 배민커넥트 꺼짐 방지 (실험실) ----------------

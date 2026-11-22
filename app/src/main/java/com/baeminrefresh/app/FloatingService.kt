@@ -58,6 +58,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val diary: String? = null,
         /** 답변 추천 버튼 (텔레그램·카카오톡·스레드) */
         val reply: Boolean = false,
+        /** 화면 녹화 버튼 (녹화 중에는 정지 버튼) */
+        val screenRec: Boolean = false,
     ) {
         /** 펼쳐진 폴더 안에 보이는 중이면 그 폴더 id (끌기 불가, 폴더 옆에 자동 배치) */
         var inFolder: Int = -1
@@ -72,6 +74,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             optimize -> "optimize"
             diary != null -> diary
             reply -> "reply"
+            screenRec -> "screenrec"
             restartPkg != null -> "rapp:$restartPkg"
             restart -> "main"
             launchPkg != null -> "sticker:$launchPkg"
@@ -133,6 +136,16 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_SCREENREC_START) {
+            val code = intent.getIntExtra(EXTRA_REC_CODE, 0)
+            val data = androidx.core.content.IntentCompat.getParcelableExtra(intent, EXTRA_REC_DATA, Intent::class.java)
+            if (data != null) startScreenRec(code, data)
+            return START_STICKY
+        }
+        if (intent?.action == ACTION_SCREENREC_STOP) {
+            stopScreenRec(null)
+            return START_STICKY
+        }
         if (intent?.action == ACTION_PEE_RESET) {
             resetPee()
             return START_STICKY
@@ -180,6 +193,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         if (prefs.diaryEnabled) diaryAttach(false) // 우리 버튼이 사라지니 일기장 앱이 자기 버튼을 다시 보여 주게
         peeHandler.removeCallbacks(peeTick)
         cancelPeeNotification()
+        if (screenRecording) {
+            screenRecording = false
+            runCatching { recRecorder?.stop() }
+            runCatching { recRecorder?.release() }
+            recRecorder = null
+            cleanupRec(saved = true)
+        }
         voiceWanted = false
         gemRecorder?.let { r ->
             runCatching { r.stop() }
@@ -219,7 +239,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
             Prefs.KEY_STICKERS -> rebuildStickers()
             Prefs.KEY_RESTART_APPS, Prefs.KEY_FOLDERS, Prefs.KEY_OPT_ENABLED -> buildAll()
-            Prefs.KEY_REPLY_ENABLED -> buildAll()
+            Prefs.KEY_REPLY_ENABLED, Prefs.KEY_SCREENREC_ENABLED -> buildAll()
             Prefs.KEY_DIARY_ENABLED -> {
                 diaryAttach(prefs.diaryEnabled)
                 buildAll()
@@ -292,6 +312,12 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     private fun buildAll() {
         removeAllBubbles()
+        if (screenRecording) {
+            // 녹화 중에는 버튼을 모두 숨긴다. (옵션이 켜졌거나 알림이 꺼져 있어 끝낼 방법이 없으면 ■ 정지 버튼만)
+            val notifOff = !androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()
+            if (prefs.screenRecStopButton || notifOff) addScreenRecBubble()
+            return
+        }
         if (floatingPaused()) {
             peeHandler.removeCallbacks(peeTick) // 알림은 그대로 둔다
             return
@@ -312,6 +338,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             addDiaryBubble(DiaryLink.KIND_IDEA)
         }
         if (!waterOnly() && prefs.replyEnabled) addReplyBubble()
+        if (!waterOnly() && prefs.screenRecEnabled) addScreenRecBubble()
         if (callBubbleWanted()) addCallBubble()
         layoutExpandedFolders()
         updatePeeState()
@@ -511,6 +538,288 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
+    // ---------------- 화면 녹화 (실험실) ----------------
+    // 탭 → ScreenRecordActivity 가 '화면 녹화 허용'을 받아 ACTION_SCREENREC_START 로 넘김 → 여기서 녹화.
+    // 녹화 중에는 플로팅 버튼을 모두 숨기고(옵션: 작은 ■ 정지 버튼만 남김), 알림의 '녹화 끝내기'·화면 끄기·■ 로 끝낸다.
+    // 영상은 갤러리 Movies/배민리프레시 에 mp4 로 저장.
+
+    var screenRecording = false
+        private set
+    private var recProjection: android.media.projection.MediaProjection? = null
+    private var recRecorder: android.media.MediaRecorder? = null
+    private var recDisplay: android.hardware.display.VirtualDisplay? = null
+    private var recUri: android.net.Uri? = null
+    private var recPfd: android.os.ParcelFileDescriptor? = null
+    private var recFile: java.io.File? = null
+    private var recStartedAt = 0L
+    private var recScreenOffOn = false
+
+    private val recScreenOff = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            if (i?.action == Intent.ACTION_SCREEN_OFF) stopScreenRec("화면이 꺼져서 녹화를 끝냈어요")
+        }
+    }
+
+    private val recCallback = object : android.media.projection.MediaProjection.Callback() {
+        override fun onStop() {
+            peeHandler.post { stopScreenRec(null) } // 시스템(상태 표시줄 녹화 표시 등)에서 멈춘 경우
+        }
+    }
+
+    private fun addScreenRecBubble() {
+        if (bubbles.any { it.screenRec }) return
+        if (!screenRecording && hiddenByFolder("screenrec")) return
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(screenRec = true)
+        b.iv = ImageView(this).apply {
+            setImageResource(if (screenRecording) R.drawable.ic_stop_square else R.drawable.ic_screenrec)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        b.frame = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (screenRecording) VOICE_COLOR_ACTIVE else REC_COLOR)
+                setStroke(dp(2), 0xFFFFFFFF.toInt())
+            }
+            elevation = dp(6).toFloat()
+            addView(b.iv, FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER))
+        }
+        b.lp = newLayoutParams(sizePx)
+        // 녹화 중 정지 버튼은 영상에 덜 보이게 반투명
+        b.frame.alpha = if (screenRecording) 0.45f else prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+        val (sx, sy) = savedPosOf(b)
+        val (cx, cy) = resolveCollision(b, sx, sy)
+        clampAndApply(b, cx, cy)
+    }
+
+    private fun onScreenRecTapped() {
+        if (screenRecording) {
+            stopScreenRec(null)
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            toast("화면 녹화는 안드로이드 10 이상에서 돼요")
+            return
+        }
+        try {
+            startActivity(
+                Intent(this, ScreenRecordActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            )
+        } catch (e: Exception) {
+            toast("녹화 허용 창을 열지 못했어요")
+        }
+    }
+
+    private fun recNotification(): Notification {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(
+                NotificationChannel(REC_CHANNEL_ID, "화면 녹화", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "화면 녹화 중 표시와 저장 알림"
+                    setShowBadge(false)
+                }
+            )
+        }
+        val stop = PendingIntent.getService(
+            this, 7, Intent(this, FloatingService::class.java).setAction(ACTION_SCREENREC_STOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        return NotificationCompat.Builder(this, REC_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_screenrec)
+            .setContentTitle("● 화면 녹화 중")
+            .setContentText("눌러서 녹화 끝내기 · 화면을 꺼도 끝나요")
+            .setContentIntent(stop)
+            .addAction(0, "■ 녹화 끝내기", stop)
+            .setOngoing(true)
+            .setUsesChronometer(true)
+            .setWhen(System.currentTimeMillis())
+            .build()
+    }
+
+    private fun startScreenRec(code: Int, data: Intent) {
+        if (screenRecording) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val withMic = prefs.screenRecMic && ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        // 안드로이드 14+: 화면 녹화용 포그라운드 서비스로 먼저 올라가야 녹화 권한을 받을 수 있다
+        var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        if (withMic) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, recNotification(), type)
+        } catch (e: Exception) {
+            toast("화면 녹화를 시작할 수 없어요")
+            runCatching { startAsForeground() }
+            return
+        }
+        val mpm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+        val proj = runCatching { mpm.getMediaProjection(code, data) }.getOrNull()
+        if (proj == null) {
+            toast("화면 녹화 허용을 받지 못했어요")
+            runCatching { startAsForeground() }
+            return
+        }
+        proj.registerCallback(recCallback, peeHandler)
+        recProjection = proj
+
+        // 영상 크기: 화면 비율 그대로, 긴 쪽 최대 1920 (짝수)
+        val (sw, sh) = realScreenSize()
+        val scale = minOf(1f, 1920f / maxOf(sw, sh))
+        val vw = ((sw * scale).toInt() / 2) * 2
+        val vh = ((sh * scale).toInt() / 2) * 2
+        val dpi = resources.displayMetrics.densityDpi
+
+        // 저장 위치: 갤러리 Movies/배민리프레시
+        val name = "배민리프레시_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date()) + ".mp4"
+        val rec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) android.media.MediaRecorder(this)
+        else @Suppress("DEPRECATION") android.media.MediaRecorder()
+        try {
+            if (withMic) rec.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+            rec.setVideoSource(android.media.MediaRecorder.VideoSource.SURFACE)
+            rec.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "Movies/배민리프레시")
+                put(android.provider.MediaStore.Video.Media.IS_PENDING, 1)
+            }
+            val uri = contentResolver.insert(
+                android.provider.MediaStore.Video.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY), values
+            ) ?: throw IllegalStateException("no uri")
+            recUri = uri
+            val pfd = contentResolver.openFileDescriptor(uri, "w") ?: throw IllegalStateException("no fd")
+            recPfd = pfd
+            rec.setOutputFile(pfd.fileDescriptor)
+            rec.setVideoEncoder(android.media.MediaRecorder.VideoEncoder.H264)
+            if (withMic) {
+                rec.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+                rec.setAudioEncodingBitRate(128_000)
+                rec.setAudioSamplingRate(44_100)
+            }
+            rec.setVideoSize(vw, vh)
+            rec.setVideoFrameRate(30)
+            rec.setVideoEncodingBitRate(8_000_000)
+            rec.prepare()
+        } catch (e: Exception) {
+            runCatching { rec.release() }
+            cleanupRec(saved = false)
+            toast("녹화 준비에 실패했어요")
+            return
+        }
+        recRecorder = rec
+        screenRecording = true
+        recStartedAt = System.currentTimeMillis()
+        // 버튼을 먼저 숨기고, 허용 창이 사라질 시간을 잠깐 둔 뒤 녹화 시작 (버튼·허용 창이 영상에 안 찍히게)
+        buildAll()
+        if (!recScreenOffOn) {
+            ContextCompat.registerReceiver(
+                this, recScreenOff, android.content.IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            recScreenOffOn = true
+        }
+        peeHandler.postDelayed({
+            if (!screenRecording || recRecorder !== rec) return@postDelayed
+            try {
+                recDisplay = proj.createVirtualDisplay(
+                    "BaeminRefreshScreenRec", vw, vh, dpi,
+                    android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    rec.surface, null, null
+                )
+                rec.start()
+                recStartedAt = System.currentTimeMillis()
+            } catch (e: Exception) {
+                toast("녹화를 시작하지 못했어요")
+                stopScreenRec(null, failed = true)
+            }
+        }, 500L)
+    }
+
+    /** 녹화를 끝내고 저장한다. message: 끝난 이유 안내(없으면 기본 문구) */
+    private fun stopScreenRec(message: String?, failed: Boolean = false) {
+        if (!screenRecording) return
+        screenRecording = false
+        val rec = recRecorder
+        recRecorder = null
+        val stoppedOk = !failed && rec != null && runCatching { rec.stop() }.isSuccess
+        runCatching { rec?.release() }
+        cleanupRec(saved = stoppedOk)
+        runCatching { startAsForeground() }
+        buildAll()
+        if (stoppedOk) {
+            toast(message ?: "녹화를 저장했어요 (갤러리 › Movies › 배민리프레시)")
+        } else if (!failed) {
+            toast("녹화가 너무 짧아 저장하지 못했어요")
+        }
+    }
+
+    private fun cleanupRec(saved: Boolean) {
+        runCatching { recDisplay?.release() }
+        recDisplay = null
+        recProjection?.let { p ->
+            runCatching { p.unregisterCallback(recCallback) }
+            runCatching { p.stop() }
+        }
+        recProjection = null
+        runCatching { recPfd?.close() }
+        recPfd = null
+        if (recScreenOffOn) {
+            runCatching { unregisterReceiver(recScreenOff) }
+            recScreenOffOn = false
+        }
+        val uri = recUri
+        recUri = null
+        if (uri != null) {
+            if (saved) {
+                runCatching {
+                    val v = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Video.Media.IS_PENDING, 0)
+                    }
+                    contentResolver.update(uri, v, null, null)
+                }
+                notifySaved(uri)
+            } else {
+                runCatching { contentResolver.delete(uri, null, null) }
+            }
+        }
+    }
+
+    /** '녹화 저장됨' 알림 — 누르면 영상 재생 */
+    private fun notifySaved(uri: android.net.Uri) {
+        runCatching {
+            val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/mp4")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            val pi = PendingIntent.getActivity(this, 8, view, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val secs = ((System.currentTimeMillis() - recStartedAt) / 1000).coerceAtLeast(0)
+            val n = NotificationCompat.Builder(this, REC_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_screenrec)
+                .setContentTitle("화면 녹화를 저장했어요 (${secs / 60}분 ${secs % 60}초)")
+                .setContentText("눌러서 보기 · 갤러리 › Movies › 배민리프레시")
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build()
+            getSystemService(NotificationManager::class.java).notify(REC_SAVED_NOTIFICATION_ID, n)
+        }
+    }
+
+    /** 상태 표시줄까지 포함한 실제 화면 크기(픽셀) */
+    private fun realScreenSize(): Pair<Int, Int> {
+        val w = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val b = w.maximumWindowMetrics.bounds
+            b.width() to b.height()
+        } else {
+            val m = android.util.DisplayMetrics()
+            @Suppress("DEPRECATION")
+            w.defaultDisplay.getRealMetrics(m)
+            m.widthPixels to m.heightPixels
+        }
+    }
+
     // ---------------- 답변 추천 버튼 (실험실) ----------------
     // 탭 → 접근성으로 텔레그램·카카오톡 화면의 대화를 읽고 → 제미나이로 답장을 받아 → 입력창에 넣는다(전송 안 함).
     // 같은 대화에서 한 번 더 누르면 앞의 추천과 다른 답장으로 바꾼다.
@@ -637,6 +946,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             add(DiaryLink.KIND_IDEA)
         }
         if (prefs.replyEnabled) add("reply")
+        if (prefs.screenRecEnabled) add("screenrec")
         if (Features.PEE && prefs.peeTrackerEnabled) add("pee")
     }
 
@@ -742,6 +1052,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             key == "voice" -> addVoiceBubble()
             key == "optimize" -> addOptimizeBubble()
             key == "reply" -> if (prefs.replyEnabled) addReplyBubble()
+            key == "screenrec" -> if (prefs.screenRecEnabled) addScreenRecBubble()
             key == DiaryLink.KIND_DIARY || key == DiaryLink.KIND_IDEA -> if (prefs.diaryEnabled) addDiaryBubble(key)
             key == "pee" -> addPeeBubble()
         }
@@ -1952,7 +2263,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             // 글자만 있는 버튼
         } else if (b.diary != null) {
             b.tv?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sizePx * 0.45f)
-        } else if (b.capture || b.voice || b.isFolder || b.optimize || b.reply) {
+        } else if (b.capture || b.voice || b.isFolder || b.optimize || b.reply || b.screenRec) {
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER)
         } else {
             // 기본 재시작(배민)은 작은 아이콘, 앱 스티커/앱 재시작은 아이콘이 꽉 차게
@@ -2002,6 +2313,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                     val size = dp(prefs.buttonSizeDp)
                     val step = if (b.diary == DiaryLink.KIND_IDEA) size + dp(prefs.buttonGapDp) else 0
                     (w - size) to ((h * 0.2f).roundToInt() + step)
+                } else x to y
+            }
+            b.screenRec -> {
+                val (x, y) = prefs.diaryPos("screenrec")
+                if (x < 0 || y < 0) {
+                    val (w, h) = screenSize()
+                    (w - dp(prefs.buttonSizeDp)) to (h * 0.62f).roundToInt()
                 } else x to y
             }
             b.reply -> {
@@ -2232,6 +2550,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 prefs.replyEnabled = false
                 toast("답변 추천 버튼을 지웠어요")
             }
+            b.screenRec -> {
+                if (screenRecording) stopScreenRec(null) // 녹화 중 정지 버튼은 길게 눌러도 끝내기
+                else {
+                    prefs.screenRecEnabled = false
+                    toast("화면 녹화 버튼을 지웠어요")
+                }
+            }
             b.capture -> {
                 prefs.captureButtonEnabled = false
                 toast("화면 캡쳐 버튼을 지웠어요")
@@ -2257,6 +2582,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.isFolder -> prefs.updateFolderPosition(b.folderId, x, y)
             b.diary != null -> prefs.setDiaryPos(b.diary, x, y)
             b.reply -> prefs.setDiaryPos("reply", x, y)
+            b.screenRec -> prefs.setDiaryPos("screenrec", x, y)
             b.optimize -> {
                 prefs.optPosX = x
                 prefs.optPosY = y
@@ -2407,6 +2733,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.optimize -> onOptimizeTapped()
             b.diary != null -> onDiaryTapped(b.diary)
             b.reply -> onReplyTapped()
+            b.screenRec -> onScreenRecTapped()
             b.isRestart -> onRestartTapped(b)
             else -> launchApp(b.launchPkg!!)
         }
@@ -2512,6 +2839,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         private const val ACTION_STOP = "com.baeminrefresh.app.STOP"
         private const val ACTION_PEE_RESET = "com.baeminrefresh.app.PEE_RESET"
         private const val ACTION_WATER_MODE = "com.baeminrefresh.app.WATER_MODE"
+        const val ACTION_SCREENREC_START = "com.baeminrefresh.app.SCREENREC_START"
+        private const val ACTION_SCREENREC_STOP = "com.baeminrefresh.app.SCREENREC_STOP"
+        const val EXTRA_REC_CODE = "rec_code"
+        const val EXTRA_REC_DATA = "rec_data"
+        private const val REC_CHANNEL_ID = "screen_rec"
+        private const val REC_SAVED_NOTIFICATION_ID = 3
+        private val REC_COLOR = 0xFF3A3F47.toInt() // 화면 녹화 버튼: 짙은 회색
         private const val LONG_PRESS_MS = 600L
         private const val FOLDER_DISSOLVE_MS = 1500L // 폴더는 이만큼 눌러야 풀린다
         private const val DOUBLE_TAP_MS = 280L // 이 안에 한 번 더 누르면 더블탭

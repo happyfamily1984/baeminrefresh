@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.34.0 (versionCode 66)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.35.0 (versionCode 67)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -41,11 +41,12 @@
 | `DiaryLink.kt` | 일기장 앱(`io.github.happyfamily1984.diary`, 저장소 `happyfamily1984/diary-app`) 연결: 명령 보내기(provider call), 화면 열기 인텐트 |
 | `ReplyAi.kt` | 답변 추천: APK에 암호화되어 든 제미나이 키 풀기(`unlock`), 모델·키 순차 시도(`suggest`), 프롬프트 |
 | `KeepAlive.kt` | 배민커넥트 꺼짐 방지: 15초마다 꺼짐 감지(FLAG_STOPPED 전환 / 화면 밖에서 FGS 멈춤) → 다시 켜고 보던 앱으로 복귀. 1분 1회·30분 6회 제한 |
+| `ScreenRecordActivity.kt` | 화면 녹화 허용 창(MediaProjection 동의)만 띄우는 투명 화면 → `FloatingService.ACTION_SCREENREC_START` |
 | `BootReceiver.kt`, `Features.kt` | 부팅 시 자동 시작 / 기능 플래그 |
 
 ### 꼭 알아둘 설계 규칙
 
-- **버튼 키 체계(폴더용)**: `"main"`(기본 재시작) · `"rapp:<pkg>"` · `"sticker:<pkg>"` · `"capture"` · `"voice"` · `"pee"` · `"optimize"` · `"diary"` · `"idea"`(일기장 쓰기) · `"reply"`(답변 추천). 통화 증폭 버튼(`callBoost`)은 통화 중에만 뜨는 임시 버튼이라 폴더 불가. 새 버튼을 추가하면 `Bubble.key`, `validFolderKeys()`, `addBubbleByKey()`, `Prefs.savedPosOfKey/setSavedPosOfKey`, `savedPosOf`, `savePositionAt`, `onBubbleTapped`, `onLongPress`, `applyAppearance`, `buildAll`, 폴더 만들기 목록(`MainActivity.showFolderCreator`)을 모두 손봐야 한다.
+- **버튼 키 체계(폴더용)**: `"main"`(기본 재시작) · `"rapp:<pkg>"` · `"sticker:<pkg>"` · `"capture"` · `"voice"` · `"pee"` · `"optimize"` · `"diary"` · `"idea"`(일기장 쓰기) · `"reply"`(답변 추천) · `"screenrec"`(화면 녹화). 통화 증폭 버튼(`callBoost`)은 통화 중에만 뜨는 임시 버튼이라 폴더 불가. 새 버튼을 추가하면 `Bubble.key`, `validFolderKeys()`, `addBubbleByKey()`, `Prefs.savedPosOfKey/setSavedPosOfKey`, `savedPosOf`, `savePositionAt`, `onBubbleTapped`, `onLongPress`, `applyAppearance`, `buildAll`, 폴더 만들기 목록(`MainActivity.showFolderCreator`)을 모두 손봐야 한다.
 - **재진입 주의**: prefs 리스너(`onSharedPreferenceChanged`)는 메인 스레드에서 **동기**로 `buildAll()`을 부른다. `buildAll()` 안에서 prefs를 쓰면 중첩 재구성이 일어나므로, 정리 저장은 `peeHandler.post{}`로 미룬다(`refreshFolders` 참고).
 - **폴더**: 닫힌 폴더의 멤버는 `hiddenByFolder(key)`로 각 `addXxxBubble()` 맨 앞에서 건너뜀. 펼치면 멤버 버블을 만들고 `layoutFolder()`가 폴더 바로 아래(공간 없으면 위)에 세로로 세움. 펼친 멤버는 `inFolder>=0`이라 위치 저장 안 함, 세로로만 끌어 순서 변경(`reorderFolderMember`). 폴더 탭 0.28초 지연 후 더블탭 판정. 길게 0.6초=반응, 1.5초=폴더 풀기(`dissolveFolder`).
 - **오버레이**: 접근성 연결 시 `TYPE_ACCESSIBILITY_OVERLAY`(통화 화면 위에도 보임), 아니면 `TYPE_APPLICATION_OVERLAY`. `refreshOverlayType()`.
@@ -79,6 +80,8 @@
 - 1.34.0 **음성 입력 = 제미나이 받아쓰기**(기본 켜짐, `Prefs.voiceGemini`, 실험실 "🎙 음성 입력: 제미나이로 받아쓰기" 카드): 탭 → `MediaRecorder`(AAC_ADTS 16kHz 모노 32kbps)로 `filesDir/voice_pending/<ts>.aac`에 녹음(버튼에 분:초, 빨강), 다시 탭 → `ReplyAi.transcribe`(노랑) → `insertText`(없으면 클립보드). 최대 2시간. 12MB 이하는 inlineData, 넘으면 Files API 재개 업로드(`uploadFile`) 후 fileData. 받아쓰기 프롬프트: 들린 말만·군말 제거·숫자 정리·배달 용어 힌트(`VOICE_HINTS`)·말 없으면 `[없음]`. 실패하면 파일을 남기고 다음 탭에 먼저 다시 보냄. 녹음 중 FGS 타입에 MICROPHONE 추가(`startAsForeground(withMic)`, 실패하면 specialUse만). 비밀번호 없거나 키 없으면 예전 폰 음성 인식으로. 모델·키 순차 시도는 `runTries`로 답변 추천과 공유(받아쓰기 readTimeout 5분).
   - **확인 필요**: 다른 앱 위에서 녹음이 실제로 되는지(안드로이드 14+ 마이크 백그라운드 제한 — 접근성 서비스가 붙어 있으면 되는 것으로 예상하지만 미확인), 긴 녹음(10분+) 받아쓰기 시간·잘림.
 
+- 1.35.0 실험실 **화면 녹화**(⏺ 버튼, 짙은 회색): 탭 → `ScreenRecordActivity`가 허용 창 → `FloatingService.startScreenRec`: FGS를 `mediaProjection`(+마이크 옵션, +specialUse) 타입으로 올린 뒤 `getMediaProjection` → `MediaRecorder`(H.264 mp4, 화면 비율 긴 쪽 ≤1920, 30fps, 8Mbps, 옵션 시 마이크 AAC) → MediaStore `Movies/배민리프레시`(IS_PENDING). 녹화 중 `buildAll()`은 버튼을 모두 숨김(`screenRecording`), 옵션 "■ 정지 버튼 남기기"가 켜졌거나 알림이 꺼져 있으면 반투명 정지 버튼만. 끝내기: 녹화 알림 '■ 녹화 끝내기'(ACTION_SCREENREC_STOP) / 화면 꺼짐(SCREEN_OFF 리시버) / 정지 버튼 / 시스템이 멈춤(MediaProjection.Callback.onStop). 허용 창이 찍히지 않게 0.5초 뒤 녹화 시작. 저장 후 '녹화를 저장했어요' 알림(누르면 재생). 안드로이드 10 이상.
+
 ## 4. 기기 검증 상태 (중요)
 
 - **사용자가 된다고 확인**: 기본 플로팅/재시작, 통화 증폭, (음성은 "일단 이걸로 써볼게").
@@ -90,6 +93,7 @@
   5. 음성 "오프라인 우선" 옵션이 체감에 도움이 되는지.
   6. **일기장 쓰기(1.29.0)**: 탭 녹음/색 변화, 재부팅 뒤 첫 탭(일기장 앱이 잠깐 열렸다 닫힘), 길게 누르기, 일기장 앱 자기 버튼 숨김/복귀.
   8. **배민커넥트 꺼짐 방지(1.32.0)**: 배민커넥트가 운행 중 상시 알림(포그라운드 서비스)을 쓰는지(안 쓰면 ②는 못 알아챔), 실제로 꺼졌을 때 다시 켜지고 복귀하는지, 엉뚱하게 다시 켜는 일은 없는지, 삼성 절전 예외 버튼이 열리는지.
+  9. **화면 녹화(1.35.0)**: 허용 → 버튼 숨김 → 녹화 → 알림/화면 끄기로 종료 → 갤러리 저장·재생, 마이크 옵션, 정지 버튼 옵션, 안드로이드 14+ "앱 하나만 녹화" 선택 시 동작.
   7. **답변 추천(1.30.0~1.31.0)**: 스레드 답글 화면에서 상대 글만 정확히 읽히는지·접힌 답글 칸이 펼쳐져 입력되는지, 텔레그램/카톡에서 대화가 제대로 읽히는지(특히 텔레그램은 말풍선을 직접 그려서 접근성 글자가 다를 수 있음), 나/상대 구분, 입력창 교체, 답변 품질·속도, 실패 시 토스트 문구.
 
 ## 5. 알려진 한계 · 사용자에게 이미 설명한 것
