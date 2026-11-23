@@ -1178,11 +1178,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     private fun addStickerBubble(sticker: Sticker) {
         val pkg = sticker.packageName
         if (hiddenByFolder("sticker:$pkg")) return
-        val iconDrawable = try {
-            packageManager.getApplicationIcon(pkg)
-        } catch (e: Exception) {
-            // 앱이 삭제됨 → 스티커 정리
-            prefs.removeSticker(pkg)
+        val iconDrawable = TargetApps.iconOf(this, pkg)
+        if (iconDrawable == null) {
+            // 앱이 삭제됨 → 스티커 정리 (다른 프로필이 잠깐 꺼진 경우는 지우지 않고 건너뜀)
+            if (!TargetApps.exists(this, pkg)) prefs.removeSticker(pkg)
             return
         }
         val sizePx = dp(prefs.buttonSizeDp)
@@ -2752,6 +2751,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     private fun launchApp(pkg: String) {
+        if (TargetApps.isOtherProfile(pkg)) { // 멀티 프로필(업무) 앱
+            if (!TargetApps.launch(this, pkg)) toast("이 앱을 실행할 수 없어요 (업무 프로필이 꺼져 있는지 확인해 주세요)")
+            return
+        }
         val intent = packageManager.getLaunchIntentForPackage(pkg)
         if (intent == null) {
             toast("이 앱을 실행할 수 없어요")

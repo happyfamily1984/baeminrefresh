@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.35.0 (versionCode 67)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.36.0 (versionCode 68)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -82,6 +82,8 @@
 
 - 1.35.0 실험실 **화면 녹화**(⏺ 버튼, 짙은 회색): 탭 → `ScreenRecordActivity`가 허용 창 → `FloatingService.startScreenRec`: FGS를 `mediaProjection`(+마이크 옵션, +specialUse) 타입으로 올린 뒤 `getMediaProjection` → `MediaRecorder`(H.264 mp4, 화면 비율 긴 쪽 ≤1920, 30fps, 8Mbps, 옵션 시 마이크 AAC) → MediaStore `Movies/배민리프레시`(IS_PENDING). 녹화 중 `buildAll()`은 버튼을 모두 숨김(`screenRecording`), 옵션 "■ 정지 버튼 남기기"가 켜졌거나 알림이 꺼져 있으면 반투명 정지 버튼만. 끝내기: 녹화 알림 '■ 녹화 끝내기'(ACTION_SCREENREC_STOP) / 화면 꺼짐(SCREEN_OFF 리시버) / 정지 버튼 / 시스템이 멈춤(MediaProjection.Callback.onStop). 허용 창이 찍히지 않게 0.5초 뒤 녹화 시작. 저장 후 '녹화를 저장했어요' 알림(누르면 재생). 안드로이드 10 이상.
 
+- 1.36.0 **멀티 프로필(업무 프로필) 앱 스티커**: 스티커 고르기·폴더 더블탭 앱 추가 목록에 다른 프로필 앱도 나옴(이름 끝 💼, 💼 표시 아이콘). 저장 형식 `Sticker.packageName = "패키지@프로필번호"`(UserManager serial), 폴더 키 `sticker:패키지@번호`. 아이콘·이름·실행은 `TargetApps.iconOf/labelOfId/launch`(LauncherApps `getActivityList`·`startMainActivity`, 프로필이 일시 중지면 `requestQuietModeEnabled(false)`로 켜기 요청). 프로필이 꺼져 있을 땐 스티커를 지우지 않고 건너뜀. 재시작 앱(`rapp:`)·폰 최적화 등은 내 프로필 앱만.
+
 ## 4. 기기 검증 상태 (중요)
 
 - **사용자가 된다고 확인**: 기본 플로팅/재시작, 통화 증폭, (음성은 "일단 이걸로 써볼게").
@@ -94,6 +96,7 @@
   6. **일기장 쓰기(1.29.0)**: 탭 녹음/색 변화, 재부팅 뒤 첫 탭(일기장 앱이 잠깐 열렸다 닫힘), 길게 누르기, 일기장 앱 자기 버튼 숨김/복귀.
   8. **배민커넥트 꺼짐 방지(1.32.0)**: 배민커넥트가 운행 중 상시 알림(포그라운드 서비스)을 쓰는지(안 쓰면 ②는 못 알아챔), 실제로 꺼졌을 때 다시 켜지고 복귀하는지, 엉뚱하게 다시 켜는 일은 없는지, 삼성 절전 예외 버튼이 열리는지.
   9. **화면 녹화(1.35.0)**: 허용 → 버튼 숨김 → 녹화 → 알림/화면 끄기로 종료 → 갤러리 저장·재생, 마이크 옵션, 정지 버튼 옵션, 안드로이드 14+ "앱 하나만 녹화" 선택 시 동작.
+  10. **멀티 프로필 스티커(1.36.0)**: 업무 탭 앱이 목록에 나오는지, 스티커 탭으로 업무 앱이 열리는지, 폴더에 넣기.
   7. **답변 추천(1.30.0~1.31.0)**: 스레드 답글 화면에서 상대 글만 정확히 읽히는지·접힌 답글 칸이 펼쳐져 입력되는지, 텔레그램/카톡에서 대화가 제대로 읽히는지(특히 텔레그램은 말풍선을 직접 그려서 접근성 글자가 다를 수 있음), 나/상대 구분, 입력창 교체, 답변 품질·속도, 실패 시 토스트 문구.
 
 ## 5. 알려진 한계 · 사용자에게 이미 설명한 것

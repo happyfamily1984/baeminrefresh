@@ -26,7 +26,7 @@ class FolderPickerActivity : AppCompatActivity() {
         }
         // 이미 어떤 폴더에 들어 있는 앱은 제외
         val inFolder = folders.flatMap { it.members }.toSet()
-        val apps = TargetApps.launchableApps(this).filter { "sticker:${it.packageName}" !in inFolder }
+        val apps = TargetApps.launchableAppsAllProfiles(this).filter { "sticker:${it.packageName}" !in inFolder }
         if (apps.isEmpty()) {
             Toast.makeText(this, "추가할 앱이 없어요", Toast.LENGTH_SHORT).show()
             finish()
@@ -41,11 +41,7 @@ class FolderPickerActivity : AppCompatActivity() {
                 val v = super.getView(position, convertView, parent)
                 val tv = v.findViewById<TextView>(android.R.id.text1)
                 tv.text = apps[position].label
-                val icon = try {
-                    packageManager.getApplicationIcon(apps[position].packageName)
-                } catch (e: Exception) {
-                    null
-                }
+                val icon = TargetApps.iconOf(this@FolderPickerActivity, apps[position].packageName)
                 icon?.setBounds(0, 0, iconSize, iconSize)
                 tv.setCompoundDrawables(icon, null, null, null)
                 tv.compoundDrawablePadding = pad

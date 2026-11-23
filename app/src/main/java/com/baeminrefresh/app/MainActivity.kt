@@ -181,14 +181,11 @@ class MainActivity : AppCompatActivity() {
         if (stickers.isEmpty()) return
         val inflater = LayoutInflater.from(this)
         for (s in stickers) {
-            val label = TargetApps.labelOf(this, s.packageName)
+            val label = TargetApps.labelOfId(this, s.packageName)
             val row = inflater.inflate(R.layout.item_sticker, container, false)
             val iconView = row.findViewById<android.widget.ImageView>(R.id.sticker_icon)
-            try {
-                iconView.setImageDrawable(packageManager.getApplicationIcon(s.packageName))
-            } catch (e: Exception) {
-                iconView.setImageResource(R.drawable.ic_refresh)
-            }
+            val icon = TargetApps.iconOf(this, s.packageName)
+            if (icon != null) iconView.setImageDrawable(icon) else iconView.setImageResource(R.drawable.ic_refresh)
             row.findViewById<TextView>(R.id.sticker_label).text = label ?: s.packageName
             row.findViewById<View>(R.id.sticker_remove).setOnClickListener {
                 prefs.removeSticker(s.packageName)
@@ -200,7 +197,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showStickerPicker() {
         val existing = prefs.getStickers().map { it.packageName }.toSet()
-        val apps = TargetApps.launchableApps(this).filter { it.packageName !in existing }
+        val apps = TargetApps.launchableAppsAllProfiles(this).filter { it.packageName !in existing }
         if (apps.isEmpty()) {
             Toast.makeText(this, "추가할 앱이 없어요", Toast.LENGTH_SHORT).show()
             return
@@ -214,11 +211,7 @@ class MainActivity : AppCompatActivity() {
                 val v = super.getView(position, convertView, parent)
                 val tv = v.findViewById<TextView>(android.R.id.text1)
                 tv.text = apps[position].label
-                val icon = try {
-                    packageManager.getApplicationIcon(apps[position].packageName)
-                } catch (e: Exception) {
-                    null
-                }
+                val icon = TargetApps.iconOf(this@MainActivity, apps[position].packageName)
                 icon?.setBounds(0, 0, iconSize, iconSize)
                 tv.setCompoundDrawables(icon, null, null, null)
                 tv.compoundDrawablePadding = pad
@@ -752,7 +745,7 @@ class MainActivity : AppCompatActivity() {
             items += "rapp:${a.packageName}" to "재시작: ${TargetApps.labelOf(this, a.packageName) ?: a.packageName}"
         }
         for (s in prefs.getStickers()) {
-            items += "sticker:${s.packageName}" to "스티커: ${TargetApps.labelOf(this, s.packageName) ?: s.packageName}"
+            items += "sticker:${s.packageName}" to "스티커: ${TargetApps.labelOfId(this, s.packageName) ?: s.packageName}"
         }
         if (prefs.captureButtonEnabled) items += "capture" to "화면 캡쳐"
         if (prefs.voiceButtonEnabled) items += "voice" to "음성 입력"
