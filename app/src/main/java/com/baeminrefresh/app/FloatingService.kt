@@ -128,6 +128,14 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         if (prefs.diaryEnabled) diaryAttach(true)
         isRunning = true
         KeepAlive.start(this)
+        runCatching {
+            registerReceiver(screenStateReceiver, android.content.IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            })
+            screenStateOn = true
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -186,6 +194,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     override fun onDestroy() {
         isRunning = false
         KeepAlive.stop()
+        if (screenStateOn) runCatching { unregisterReceiver(screenStateReceiver) }
+        screenStateOn = false
         if (instance === this) instance = null
         prefs.unregisterListener(this)
         PhoneOptimizer.removeListener(optimizeListener)
@@ -320,6 +330,12 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
         if (floatingPaused()) {
             peeHandler.removeCallbacks(peeTick) // 알림은 그대로 둔다
+            return
+        }
+        if (!screenFullyOn()) {
+            // 화면 꺼짐·Always On Display·잠금화면에서는 숨긴다 (통화 중 잠금화면이면 통화 증폭 버튼만)
+            peeHandler.removeCallbacks(peeTick)
+            if (screenInteractive() && callBubbleWanted()) addCallBubble()
             return
         }
         refreshFolders()
@@ -1129,6 +1145,29 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
 
     /** 실험실 설정이 켜져 있고 지금 가로모드면 플로팅 아이콘을 하나도 띄우지 않는다. */
     private fun floatingPaused(): Boolean = prefs.labPauseStickersLandscape && isLandscape()
+
+    // ---------------- 화면 상태: 잠금이 풀려 화면이 완전히 켜졌을 때만 버튼을 보인다 ----------------
+
+    private fun screenInteractive(): Boolean =
+        runCatching { (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isInteractive }.getOrDefault(true)
+
+    private fun screenFullyOn(): Boolean {
+        if (!screenInteractive()) return false // 화면 꺼짐·Always On Display
+        val km = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+        return !runCatching { km.isKeyguardLocked }.getOrDefault(false) // 잠금화면
+    }
+
+    private var screenStateOn = false
+    private val screenStateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            if (!isRunning) return
+            when (i?.action) {
+                Intent.ACTION_SCREEN_OFF -> buildAll()
+                // 잠금이 없는 폰은 켜지자마자, 잠금이 있으면 풀린 뒤(USER_PRESENT)에 보인다
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> peeHandler.postDelayed({ if (isRunning) buildAll() }, 300L)
+            }
+        }
+    }
 
     private fun removeStickerBubbles() {
         val toRemove = bubbles.filter { it.isSticker }

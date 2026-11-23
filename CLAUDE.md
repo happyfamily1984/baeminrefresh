@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.36.0 (versionCode 68)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.36.1 (versionCode 69)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -83,6 +83,7 @@
 - 1.35.0 실험실 **화면 녹화**(⏺ 버튼, 짙은 회색): 탭 → `ScreenRecordActivity`가 허용 창 → `FloatingService.startScreenRec`: FGS를 `mediaProjection`(+마이크 옵션, +specialUse) 타입으로 올린 뒤 `getMediaProjection` → `MediaRecorder`(H.264 mp4, 화면 비율 긴 쪽 ≤1920, 30fps, 8Mbps, 옵션 시 마이크 AAC) → MediaStore `Movies/배민리프레시`(IS_PENDING). 녹화 중 `buildAll()`은 버튼을 모두 숨김(`screenRecording`), 옵션 "■ 정지 버튼 남기기"가 켜졌거나 알림이 꺼져 있으면 반투명 정지 버튼만. 끝내기: 녹화 알림 '■ 녹화 끝내기'(ACTION_SCREENREC_STOP) / 화면 꺼짐(SCREEN_OFF 리시버) / 정지 버튼 / 시스템이 멈춤(MediaProjection.Callback.onStop). 허용 창이 찍히지 않게 0.5초 뒤 녹화 시작. 저장 후 '녹화를 저장했어요' 알림(누르면 재생). 안드로이드 10 이상.
 
 - 1.36.0 **멀티 프로필(업무 프로필) 앱 스티커**: 스티커 고르기·폴더 더블탭 앱 추가 목록에 다른 프로필 앱도 나옴(이름 끝 💼, 💼 표시 아이콘). 저장 형식 `Sticker.packageName = "패키지@프로필번호"`(UserManager serial), 폴더 키 `sticker:패키지@번호`. 아이콘·이름·실행은 `TargetApps.iconOf/labelOfId/launch`(LauncherApps `getActivityList`·`startMainActivity`, 프로필이 일시 중지면 `requestQuietModeEnabled(false)`로 켜기 요청). 프로필이 꺼져 있을 땐 스티커를 지우지 않고 건너뜀. 재시작 앱(`rapp:`)·폰 최적화 등은 내 프로필 앱만.
+- 1.36.1 **화면이 완전히 켜졌을 때만 버튼 표시**: `buildAll()`이 `screenFullyOn()`(isInteractive && !isKeyguardLocked)이 아니면 버튼을 안 올림 → 화면 꺼짐·Always On Display·잠금화면에서 숨김(통화 중 잠금화면이면 통화 증폭 버튼만). SCREEN_OFF/SCREEN_ON/USER_PRESENT 리시버(`screenStateReceiver`)로 다시 그림. 화면 녹화 중 화면이 꺼지면 녹화는 원래대로 끝남.
 
 ## 4. 기기 검증 상태 (중요)
 
