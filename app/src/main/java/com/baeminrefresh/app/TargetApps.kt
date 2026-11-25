@@ -17,7 +17,51 @@ object TargetApps {
     // 스티커에는 앱 아이디를 "패키지" 로 저장한다. 다른 프로필의 앱은 "패키지@프로필번호"
     // (UserManager 가 주는 프로필 고유 번호)로 저장해서 구분한다. 폴더 키도 "sticker:패키지@번호".
 
-    fun isOtherProfile(id: String): Boolean = '@' in id
+    fun isOtherProfile(id: String): Boolean = '@' in id && !isClone(id)
+
+    // ---------------- 멀티로그인 개인용 복제본 ----------------
+    // 멀티로그인 개인용(가상 공간)의 복제본은 "mlp:<가상사용자번호>:<패키지>" 로 저장한다.
+    // 목록은 그 앱의 ContentProvider 에서 읽고, 실행은 그 앱의 ShortcutLaunchActivity 에 맡긴다.
+    const val MLP_PKG = "com.happyfamily1984.multilogin.personal"
+    private const val MLP_AUTH = "$MLP_PKG.clones"
+    private const val MLP_LAUNCH = "$MLP_PKG.ShortcutLaunchActivity"
+    private val cloneTitles = HashMap<String, String>()
+
+    fun isClone(id: String): Boolean = id.startsWith("mlp:")
+    private fun cloneUser(id: String): Int? = id.removePrefix("mlp:").substringBefore(':').toIntOrNull()
+    private fun clonePkg(id: String): String = id.removePrefix("mlp:").substringAfter(':')
+
+    /** 멀티로그인 개인용의 복제본들 — 이름 끝에 🔗 (앱이 없으면 빈 목록) */
+    fun cloneApps(ctx: Context): List<AppEntry> {
+        val out = ArrayList<AppEntry>()
+        runCatching {
+            ctx.contentResolver.query(android.net.Uri.parse("content://$MLP_AUTH"), null, null, null, null)?.use { c ->
+                val iPkg = c.getColumnIndex("pkg"); val iUser = c.getColumnIndex("user"); val iTitle = c.getColumnIndex("title")
+                while (c.moveToNext()) {
+                    val id = "mlp:${c.getInt(iUser)}:${c.getString(iPkg)}"
+                    val title = c.getString(iTitle)
+                    synchronized(cloneTitles) { cloneTitles[id] = title }
+                    out += AppEntry("$title 🔗", id)
+                }
+            }
+        }
+        return out
+    }
+
+    private fun cloneLabel(ctx: Context, id: String): String? {
+        synchronized(cloneTitles) { cloneTitles[id] }?.let { return "$it 🔗" }
+        cloneApps(ctx)
+        synchronized(cloneTitles) { cloneTitles[id] }?.let { return "$it 🔗" }
+        return labelOf(ctx, clonePkg(id))?.let { "$it 복제 🔗" }
+    }
+
+    private fun launchClone(ctx: Context, id: String): Boolean {
+        val user = cloneUser(id) ?: return false
+        val intent = Intent(Intent.ACTION_VIEW).setClassName(MLP_PKG, MLP_LAUNCH)
+            .putExtra("pkg", clonePkg(id)).putExtra("user", user)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { ctx.startActivity(intent) }.isSuccess
+    }
 
     fun pkgOf(id: String): String = id.substringBefore('@')
 
@@ -51,6 +95,7 @@ object TargetApps {
 
     /** 앱 아이콘 (다른 프로필 앱은 💼 표시가 붙은 아이콘). 없으면 null */
     fun iconOf(ctx: Context, id: String): Drawable? {
+        if (isClone(id)) return runCatching { ctx.packageManager.getApplicationIcon(clonePkg(id)) }.getOrNull()
         if (!isOtherProfile(id)) return runCatching { ctx.packageManager.getApplicationIcon(id) }.getOrNull()
         val user = userOf(ctx, id) ?: return null
         val a = runCatching {
@@ -61,6 +106,7 @@ object TargetApps {
 
     /** 앱 이름 (다른 프로필 앱은 끝에 💼). 없으면 null */
     fun labelOfId(ctx: Context, id: String): String? {
+        if (isClone(id)) return cloneLabel(ctx, id)
         if (!isOtherProfile(id)) return labelOf(ctx, id)
         val user = userOf(ctx, id) ?: return null
         val a = runCatching {
@@ -71,6 +117,8 @@ object TargetApps {
 
     /** 앱이 아직 있는지 (다른 프로필이 잠깐 꺼져 있으면 있는 것으로 본다 — 스티커를 지우지 않게) */
     fun exists(ctx: Context, id: String): Boolean {
+        // 복제본: 멀티로그인 개인용과 원본 앱이 설치돼 있으면 있는 것으로 본다
+        if (isClone(id)) return labelOf(ctx, MLP_PKG) != null && labelOf(ctx, clonePkg(id)) != null
         if (!isOtherProfile(id)) return labelOf(ctx, id) != null
         val user = userOf(ctx, id) ?: return false
         val um = ctx.getSystemService(UserManager::class.java)
@@ -80,6 +128,7 @@ object TargetApps {
 
     /** 앱 실행. 다른 프로필 앱은 LauncherApps 로 그 프로필에서 연다. 성공하면 true */
     fun launch(ctx: Context, id: String): Boolean {
+        if (isClone(id)) return launchClone(ctx, id)
         if (!isOtherProfile(id)) {
             val intent = ctx.packageManager.getLaunchIntentForPackage(id) ?: return false
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -96,9 +145,9 @@ object TargetApps {
         return runCatching { la.startMainActivity(a.componentName, user, null, null) }.isSuccess
     }
 
-    /** 스티커로 고를 수 있는 앱: 내 프로필 앱 + 다른 프로필(업무 등) 앱 */
+    /** 스티커로 고를 수 있는 앱: 내 프로필 앱 + 다른 프로필(업무 등) 앱 + 멀티로그인 개인용 복제본 */
     fun launchableAppsAllProfiles(context: Context): List<AppEntry> =
-        launchableApps(context) + otherProfileApps(context)
+        launchableApps(context) + otherProfileApps(context) + cloneApps(context)
 
     /** 실행 가능한(런처에 보이는) 앱 목록. 배민커넥트로 보이는 앱이 맨 위로 온다. */
     fun launchableApps(context: Context): List<AppEntry> {

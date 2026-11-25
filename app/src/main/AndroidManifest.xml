@@ -29,6 +29,8 @@
 
     <!-- 설치된 앱 목록에서 배민커넥트를 찾고 실행하기 위해 필요 -->
     <queries>
+        <!-- 멀티로그인 개인용 복제본 목록(스티커) -->
+        <package android:name="com.happyfamily1984.multilogin.personal" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

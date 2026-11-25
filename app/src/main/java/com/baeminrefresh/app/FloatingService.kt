@@ -2790,6 +2790,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
     }
 
     private fun launchApp(pkg: String) {
+        if (TargetApps.isClone(pkg)) { // 멀티로그인 개인용 복제본
+            if (!TargetApps.launch(this, pkg)) toast("복제본을 실행할 수 없어요 (멀티로그인 개인용이 설치돼 있는지 확인해 주세요)")
+            return
+        }
         if (TargetApps.isOtherProfile(pkg)) { // 멀티 프로필(업무) 앱
             if (!TargetApps.launch(this, pkg)) toast("이 앱을 실행할 수 없어요 (업무 프로필이 꺼져 있는지 확인해 주세요)")
             return

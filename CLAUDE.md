@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.36.2 (versionCode 70)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.37.0 (versionCode 71)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -46,6 +46,7 @@
 
 ### 꼭 알아둘 설계 규칙
 
+- **스티커 앱 아이디**: 일반 `패키지` · 다른 프로필(업무) `패키지@프로필번호` · **멀티로그인 개인용 복제본 `mlp:<가상사용자번호>:<패키지>`**(1.37.0). 복제본 목록은 `content://com.happyfamily1984.multilogin.personal.clones`(열 pkg/user/title), 실행은 그 앱의 `ShortcutLaunchActivity`(extra `pkg`, `user`). 코드는 `TargetApps.isClone/cloneApps/launchClone`.
 - **버튼 키 체계(폴더용)**: `"main"`(기본 재시작) · `"rapp:<pkg>"` · `"sticker:<pkg>"` · `"capture"` · `"voice"` · `"pee"` · `"optimize"` · `"diary"` · `"idea"`(일기장 쓰기) · `"reply"`(답변 추천) · `"screenrec"`(화면 녹화). 통화 증폭 버튼(`callBoost`)은 통화 중에만 뜨는 임시 버튼이라 폴더 불가. 새 버튼을 추가하면 `Bubble.key`, `validFolderKeys()`, `addBubbleByKey()`, `Prefs.savedPosOfKey/setSavedPosOfKey`, `savedPosOf`, `savePositionAt`, `onBubbleTapped`, `onLongPress`, `applyAppearance`, `buildAll`, 폴더 만들기 목록(`MainActivity.showFolderCreator`)을 모두 손봐야 한다.
 - **재진입 주의**: prefs 리스너(`onSharedPreferenceChanged`)는 메인 스레드에서 **동기**로 `buildAll()`을 부른다. `buildAll()` 안에서 prefs를 쓰면 중첩 재구성이 일어나므로, 정리 저장은 `peeHandler.post{}`로 미룬다(`refreshFolders` 참고).
 - **폴더**: 닫힌 폴더의 멤버는 `hiddenByFolder(key)`로 각 `addXxxBubble()` 맨 앞에서 건너뜀. 펼치면 멤버 버블을 만들고 `layoutFolder()`가 폴더 바로 아래(공간 없으면 위)에 세로로 세움. 펼친 멤버는 `inFolder>=0`이라 위치 저장 안 함, 세로로만 끌어 순서 변경(`reorderFolderMember`). 폴더 탭 0.28초 지연 후 더블탭 판정. 길게 0.6초=반응, 1.5초=폴더 풀기(`dissolveFolder`).
