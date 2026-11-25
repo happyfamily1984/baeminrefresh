@@ -55,6 +55,37 @@ object TargetApps {
         return labelOf(ctx, clonePkg(id))?.let { "$it 복제 🔗" }
     }
 
+    /** 복제본 번호: "피클 -2" 의 2. 모르면 가상사용자번호+1 */
+    private fun cloneIndex(ctx: Context, id: String): String {
+        val title = synchronized(cloneTitles) { cloneTitles[id] } ?: run { cloneApps(ctx); synchronized(cloneTitles) { cloneTitles[id] } }
+        return title?.let { Regex("-(\\d+)$").find(it.trim())?.groupValues?.get(1) } ?: ((cloneUser(id) ?: 0) + 1).toString()
+    }
+
+    /** 원래 앱 아이콘 오른쪽 아래에 보라색 번호 배지를 붙인다 (원본 앱 스티커와 구분) */
+    private fun withCloneBadge(ctx: Context, base: Drawable, number: String): Drawable {
+        val size = 192
+        val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        base.setBounds(0, 0, size, size)
+        base.draw(c)
+        val r = size * 0.23f
+        val cx = size - r - 2f
+        val cy = size - r - 2f
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        p.color = android.graphics.Color.WHITE
+        c.drawCircle(cx, cy, r + 6f, p)
+        p.shader = android.graphics.LinearGradient(cx - r, cy - r, cx + r, cy + r,
+            0xFFA594FA.toInt(), 0xFF6150E6.toInt(), android.graphics.Shader.TileMode.CLAMP)
+        c.drawCircle(cx, cy, r, p)
+        p.shader = null
+        p.color = android.graphics.Color.WHITE
+        p.textAlign = android.graphics.Paint.Align.CENTER
+        p.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        p.textSize = if (number.length >= 2) r * 1.05f else r * 1.35f
+        c.drawText(number, cx, cy - (p.descent() + p.ascent()) / 2f, p)
+        return android.graphics.drawable.BitmapDrawable(ctx.resources, bmp)
+    }
+
     private fun launchClone(ctx: Context, id: String): Boolean {
         val user = cloneUser(id) ?: return false
         val intent = Intent(Intent.ACTION_VIEW).setClassName(MLP_PKG, MLP_LAUNCH)
@@ -95,7 +126,10 @@ object TargetApps {
 
     /** 앱 아이콘 (다른 프로필 앱은 💼 표시가 붙은 아이콘). 없으면 null */
     fun iconOf(ctx: Context, id: String): Drawable? {
-        if (isClone(id)) return runCatching { ctx.packageManager.getApplicationIcon(clonePkg(id)) }.getOrNull()
+        if (isClone(id)) {
+            val base = runCatching { ctx.packageManager.getApplicationIcon(clonePkg(id)) }.getOrNull() ?: return null
+            return withCloneBadge(ctx, base, cloneIndex(ctx, id))
+        }
         if (!isOtherProfile(id)) return runCatching { ctx.packageManager.getApplicationIcon(id) }.getOrNull()
         val user = userOf(ctx, id) ?: return null
         val a = runCatching {
