@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.36.1 (versionCode 69)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.36.2 (versionCode 70)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -84,6 +84,7 @@
 
 - 1.36.0 **멀티 프로필(업무 프로필) 앱 스티커**: 스티커 고르기·폴더 더블탭 앱 추가 목록에 다른 프로필 앱도 나옴(이름 끝 💼, 💼 표시 아이콘). 저장 형식 `Sticker.packageName = "패키지@프로필번호"`(UserManager serial), 폴더 키 `sticker:패키지@번호`. 아이콘·이름·실행은 `TargetApps.iconOf/labelOfId/launch`(LauncherApps `getActivityList`·`startMainActivity`, 프로필이 일시 중지면 `requestQuietModeEnabled(false)`로 켜기 요청). 프로필이 꺼져 있을 땐 스티커를 지우지 않고 건너뜀. 재시작 앱(`rapp:`)·폰 최적화 등은 내 프로필 앱만.
 - 1.36.1 **화면이 완전히 켜졌을 때만 버튼 표시**: `buildAll()`이 `screenFullyOn()`(isInteractive && !isKeyguardLocked)이 아니면 버튼을 안 올림 → 화면 꺼짐·Always On Display·잠금화면에서 숨김(통화 중 잠금화면이면 통화 증폭 버튼만). SCREEN_OFF/SCREEN_ON/USER_PRESENT 리시버(`screenStateReceiver`)로 다시 그림. 화면 녹화 중 화면이 꺼지면 녹화는 원래대로 끝남.
+- 1.36.2 **통화 증폭 고침**(사용자: "계속 실패"): ① '추가 음량' 버튼을 통화 시작 20초만이 아니라 **통화 내내 통화 화면이 보일 때마다** 찾음(`callScreenVisible`), 라벨 후보 확대(`EXTRA_VOLUME_LABELS`) ② 3번 못 찾으면 통화 화면 '더보기(⋮)' 메뉴를 한 번 열어 그 안에서 찾고, 없으면 메뉴만 뒤로 닫음(`trySamsungExtraVolumeViaMenu`, 통화마다 1회) ③ 그래도 못 찾으면 통화 화면 버튼 글자(숫자 든 글자 제외)를 `Prefs.callBoostDebug`에 남겨 설정 카드에 표시(길게 복사) ④ **영상통화 제외**: `CameraManager.AvailabilityCallback`으로 카메라 사용 중이면 통화로 보지 않음(버튼·증폭 없음).
 
 ## 4. 기기 검증 상태 (중요)
 

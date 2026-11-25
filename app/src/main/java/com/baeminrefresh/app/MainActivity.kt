@@ -157,6 +157,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         refreshReplyDebug()
         refreshKeepAlive()
+        refreshCallBoostDebug()
         if (prefs.targetPackage == null) {
             TargetApps.detectBaeminConnect(this)?.let { prefs.targetPackage = it.packageName }
         }
@@ -1119,6 +1120,21 @@ class MainActivity : AppCompatActivity() {
             label.text = "증폭 세기: $p"
             RestartAccessibilityService.instance?.callVolume?.applyNow()
         })
+        val dbg = findViewById<TextView>(R.id.call_boost_debug)
+        dbg.setOnLongClickListener {
+            val cm = getSystemService(android.content.ClipboardManager::class.java)
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("call boost", prefs.callBoostDebug))
+            Toast.makeText(this, "복사했어요", Toast.LENGTH_SHORT).show()
+            true
+        }
+        refreshCallBoostDebug()
+    }
+
+    private fun refreshCallBoostDebug() {
+        val dbg = findViewById<TextView>(R.id.call_boost_debug) ?: return
+        val last = prefs.callBoostDebug
+        dbg.visibility = if (last.isEmpty()) View.GONE else View.VISIBLE
+        dbg.text = "🔎 지난 통화에서 '추가 음량' 버튼을 못 찾았어요. 통화 화면에서 본 버튼 (길게 누르면 복사):\n$last"
     }
 
     private fun kakaoPackageOrDetect(): String? =

@@ -781,7 +781,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
                                 android:lineSpacingExtra="2dp"
-                                android:text="통화 중에만 '증폭' 버튼이 떠요. 누르면 켜고/꺼요. 초록=증폭 중, 주황=확인 중, 빨강=켰지만 효과 확인 안 됨, 회색=꺼짐. 켜면 통화 음량 최대 + 삼성 통화화면 '추가 음량' 자동 켜기 + 소리 증폭기를 함께 써요. (접근성 필요)"
+                                android:text="통화 중에만 '증폭' 버튼이 떠요(영상통화는 제외). 누르면 켜고/꺼요. 초록=증폭 중, 주황=확인 중, 빨강=통화 음량은 최대로 했지만 '추가 음량' 버튼을 못 찾음, 회색=꺼짐. 켜면 통화 음량 최대 + 삼성 통화화면 '추가 음량' 자동 켜기(통화 화면이 보일 때마다 찾아요) + 소리 증폭기를 함께 써요. (접근성 필요)"
                                 android:textColor="@color/text_sub"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -807,6 +807,16 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
                         android:max="100" />
+
+                    <TextView
+                        android:id="@+id/call_boost_debug"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:lineSpacingExtra="2dp"
+                        android:textColor="@color/text_sub"
+                        android:textSize="12sp"
+                        android:visibility="gone" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

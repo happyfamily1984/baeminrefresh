@@ -15,6 +15,10 @@ import android.os.SystemClock
  *  2) 삼성 통화 화면의 '추가 음량(Extra volume)' 버튼이 보이면 눌러서 켠다 → 일반 전화에 가장 확실
  *  3) 소리 증폭기(LoudnessEnhancer, 최대 +9dB) → 보이스톡 같은 인터넷 전화에 효과
  * 그리고 실제로 증폭되는지 확인한다: 통화 소리가 앱이 다룰 수 있는 경로로 나오는지(Visualizer로 소리 감지).
+ *
+ * 1.36.2: '추가 음량' 버튼을 통화 내내(통화 화면이 보일 때마다) 찾고, 안 보이면 '더보기' 메뉴에서 한 번 찾는다.
+ *         못 찾으면 통화 화면 버튼 글자를 Prefs.callBoostDebug 에 남긴다(설정 카드에 표시).
+ *         영상통화(카메라 사용 중)는 증폭하지 않는다.
  */
 class CallVolume(private val service: RestartAccessibilityService) {
 
@@ -32,6 +36,16 @@ class CallVolume(private val service: RestartAccessibilityService) {
     private var soundSeen = false
     private var extraVolumeOn = false
     private var extraTries = 0
+    private var menuTried = false
+    private var debugSaved = false
+
+    // 영상통화 감지: 카메라를 어떤 앱이 쓰는 중이면 영상통화로 본다
+    private val camerasInUse = HashSet<String>()
+    private val cameraCallback = object : android.hardware.camera2.CameraManager.AvailabilityCallback() {
+        override fun onCameraUnavailable(cameraId: String) { camerasInUse.add(cameraId) }
+        override fun onCameraAvailable(cameraId: String) { camerasInUse.remove(cameraId) }
+    }
+    private var cameraWatching = false
 
     var inCall = false
         private set
@@ -49,12 +63,23 @@ class CallVolume(private val service: RestartAccessibilityService) {
     fun start() {
         if (running) return
         running = true
+        runCatching {
+            service.getSystemService(android.hardware.camera2.CameraManager::class.java)
+                .registerAvailabilityCallback(cameraCallback, handler)
+            cameraWatching = true
+        }
         handler.post(poll)
     }
 
     fun stop() {
         running = false
         handler.removeCallbacks(poll)
+        if (cameraWatching) runCatching {
+            service.getSystemService(android.hardware.camera2.CameraManager::class.java)
+                .unregisterAvailabilityCallback(cameraCallback)
+        }
+        cameraWatching = false
+        camerasInUse.clear()
         boostOff(restoreVolume = true)
         inCall = false
     }
@@ -70,7 +95,8 @@ class CallVolume(private val service: RestartAccessibilityService) {
     }
 
     private fun tick(force: Boolean = false) {
-        val nowInCall = isCallMode() && prefs.callBoostEnabled
+        // 영상통화(카메라 사용 중)는 증폭하지 않고 버튼도 띄우지 않는다
+        val nowInCall = isCallMode() && prefs.callBoostEnabled && camerasInUse.isEmpty()
         val changedCall = nowInCall != inCall
         inCall = nowInCall
         val want = inCall && prefs.callBoostActive
@@ -80,9 +106,20 @@ class CallVolume(private val service: RestartAccessibilityService) {
         else if (want && force) applyGain()
 
         if (boostOn) {
-            if (!extraVolumeOn && extraTries < 20) { // 통화 화면이 뜰 때까지 몇 초간 '추가 음량' 버튼을 찾아본다
+            // 통화 내내, 통화 화면이 보일 때마다 '추가 음량' 버튼을 찾는다
+            if (!extraVolumeOn && service.callScreenVisible()) {
                 extraTries++
                 if (service.setSamsungExtraVolume(true)) extraVolumeOn = true
+                else if (extraTries >= 3 && !menuTried) {
+                    // 바로 안 보이면 '더보기' 메뉴 안에서 한 번 찾아본다
+                    menuTried = true
+                    service.trySamsungExtraVolumeViaMenu { ok ->
+                        if (ok) {
+                            extraVolumeOn = true
+                            tick(force = true)
+                        }
+                    }
+                }
             }
             measure()
         }
@@ -92,6 +129,12 @@ class CallVolume(private val service: RestartAccessibilityService) {
             SystemClock.uptimeMillis() - boostStartedAt < 6000L -> Status.CHECKING
             else -> Status.NOT_DETECTED
         }
+        // 못 찾았으면 통화 화면의 버튼 글자를 남겨 둔다(그 폰 라벨에 맞추기 위해)
+        if (newStatus == Status.NOT_DETECTED && !debugSaved && service.callScreenVisible() && menuTried) {
+            debugSaved = true
+            prefs.callBoostDebug = service.callScreenLabels()
+        }
+        if (newStatus == Status.WORKING && extraVolumeOn) prefs.callBoostDebug = ""
         if (newStatus != status || changedCall || force) {
             status = newStatus
             FloatingService.instance?.onCallBoostChanged()
@@ -104,6 +147,9 @@ class CallVolume(private val service: RestartAccessibilityService) {
         soundSeen = false
         extraVolumeOn = false
         extraTries = 0
+        menuTried = false
+        debugSaved = false
+        service.resetExtraVolumeMenuTry()
         val stream = AudioManager.STREAM_VOICE_CALL
         runCatching {
             savedVolume = am.getStreamVolume(stream)

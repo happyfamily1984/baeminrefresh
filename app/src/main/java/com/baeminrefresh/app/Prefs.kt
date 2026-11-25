@@ -69,6 +69,11 @@ class Prefs(context: Context) {
         set(value) = sp.edit().putBoolean(KEY_CALL_ACTIVE, value).apply()
 
     /** 증폭 세기 0~100 */
+    /** 통화 증폭이 '추가 음량' 버튼을 못 찾았을 때 통화 화면에서 본 버튼 글자 */
+    var callBoostDebug: String
+        get() = sp.getString("call_boost_debug", "") ?: ""
+        set(value) = sp.edit().putString("call_boost_debug", value).apply()
+
     var callBoostLevel: Int
         get() = sp.getInt(KEY_CALL_LEVEL, 60)
         set(value) = sp.edit().putInt(KEY_CALL_LEVEL, value).apply()

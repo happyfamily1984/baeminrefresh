@@ -54,18 +54,75 @@ class RestartAccessibilityService : AccessibilityService() {
      * 삼성 통화 화면의 '추가 음량(Extra volume)' 버튼을 켜거나 끈다. 통화 화면이 보일 때만 가능.
      * @return 원하는 상태로 만들었으면 true
      */
-    fun setSamsungExtraVolume(on: Boolean): Boolean {
-        val labels = listOf("추가음량", "추가볼륨", "음량높이기", "볼륨높이기", "음량키우기", "extravolume")
+    private fun isCallScreenPkg(pkg: String): Boolean =
+        pkg.contains("incallui") || pkg.contains("dialer") || pkg.contains("telecom") ||
+            pkg == "com.samsung.android.app.telephonyui"
+
+    private fun callScreenRoots(): List<AccessibilityNodeInfo> {
         val roots = mutableListOf<AccessibilityNodeInfo>()
         runCatching { for (w in windows) w.root?.let { roots.add(it) } }
-        for (r in roots) {
-            val pkg = r.packageName?.toString() ?: continue
-            if (!pkg.contains("incallui") && !pkg.contains("dialer") && !pkg.contains("telecom")) continue
-            val node = findNode(r) { n ->
-                val t = listOfNotNull(n.text, n.contentDescription).joinToString(" ")
-                    .replace(" ", "").lowercase()
-                n.isVisibleToUser && labels.any { t.contains(it) }
-            } ?: continue
+        return roots.filter { isCallScreenPkg(it.packageName?.toString() ?: "") }
+    }
+
+    /** 통화 화면이 지금 보이는지 */
+    fun callScreenVisible(): Boolean = callScreenRoots().isNotEmpty()
+
+    private fun isExtraVolumeNode(n: AccessibilityNodeInfo): Boolean {
+        val t = listOfNotNull(n.text, n.contentDescription).joinToString(" ").replace(" ", "").lowercase()
+        return n.isVisibleToUser && EXTRA_VOLUME_LABELS.any { t.contains(it) }
+    }
+
+    /** 통화 화면에 보이는 버튼·글자 (못 찾았을 때 안내용) */
+    fun callScreenLabels(): String {
+        val seen = LinkedHashSet<String>()
+        for (r in callScreenRoots()) forEachNode(r) { n ->
+            if (!n.isVisibleToUser) return@forEachNode
+            val t = listOfNotNull(n.text, n.contentDescription).joinToString(" ").trim()
+            if (t.isNotEmpty() && t.length <= 20 && !t.any { it.isDigit() }) seen += t // 번호·시간은 빼서 개인정보가 안 남게
+        }
+        return if (seen.isEmpty()) "통화 화면을 못 찾음" else seen.take(15).joinToString(", ")
+    }
+
+    private var extraMenuTried = false
+
+    /** 새 통화마다 '더보기 메뉴에서 찾기'를 다시 한 번 할 수 있게 */
+    fun resetExtraVolumeMenuTry() { extraMenuTried = false }
+
+    /**
+     * '추가 음량'이 통화 화면에 바로 안 보이면 '더보기(⋮)' 메뉴를 한 번 열어 그 안에서 찾는다.
+     * 메뉴에도 없으면 메뉴만 닫는다(뒤로). 통화마다 한 번만.
+     */
+    fun trySamsungExtraVolumeViaMenu(onDone: (Boolean) -> Unit) {
+        if (extraMenuTried) { onDone(false); return }
+        val root = rootInActiveWindow
+        if (root == null || !isCallScreenPkg(root.packageName?.toString() ?: "")) { onDone(false); return }
+        val more = findNode(root) { n ->
+            val t = listOfNotNull(n.contentDescription, n.text).joinToString(" ").replace(" ", "").lowercase()
+            n.isVisibleToUser && (t.contains("더보기") || t.contains("추가옵션") || t.contains("moreoptions") || t == "more")
+        }
+        if (more == null) { onDone(false); return }
+        extraMenuTried = true
+        val windowsBefore = runCatching { windows.size }.getOrDefault(0)
+        if (!clickableOf(more).performAction(AccessibilityNodeInfo.ACTION_CLICK)) { onDone(false); return }
+        handler.postDelayed({
+            var ok = false
+            val roots = mutableListOf<AccessibilityNodeInfo>()
+            runCatching { for (w in windows) w.root?.let { roots.add(it) } }
+            for (r in roots) {
+                val node = findNode(r) { isExtraVolumeNode(it) } ?: continue
+                ok = clickableOf(node).performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                if (ok) break
+            }
+            if (!ok && runCatching { windows.size }.getOrDefault(0) > windowsBefore) {
+                performGlobalAction(GLOBAL_ACTION_BACK) // 열린 메뉴만 닫기
+            }
+            onDone(ok)
+        }, 700L)
+    }
+
+    fun setSamsungExtraVolume(on: Boolean): Boolean {
+        for (r in callScreenRoots()) {
+            val node = findNode(r) { isExtraVolumeNode(it) } ?: continue
             // 켜짐 상태를 알 수 있으면 다를 때만 누른다
             var target: AccessibilityNodeInfo? = node
             var depth = 0
@@ -1001,6 +1058,10 @@ class RestartAccessibilityService : AccessibilityService() {
         /** 마지막으로 재시작·강제 중지 단계를 밟은 시각(elapsedRealtime) — 꺼짐 방지가 우리 동작에 반응하지 않게 */
         @Volatile
         var lastBusyAt = 0L
+        private val EXTRA_VOLUME_LABELS = listOf(
+            "추가음량", "추가볼륨", "음량추가", "볼륨추가", "음량높이기", "볼륨높이기", "음량키우기",
+            "음량증폭", "볼륨부스트", "extravolume", "volumeboost"
+        )
         const val THREADS_PKG = "com.instagram.barcelona"
         private val THREAD_HINT_KO = Regex("^\\s*(.+?)님에게 답글")
         private val THREAD_HINT_EN = Regex("^\\s*Reply to (.+?)(\\.\\.\\.|…|$)")
