@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.37.1 (versionCode 72)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.37.2 (versionCode 73)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -86,6 +86,7 @@
 - 1.36.0 **멀티 프로필(업무 프로필) 앱 스티커**: 스티커 고르기·폴더 더블탭 앱 추가 목록에 다른 프로필 앱도 나옴(이름 끝 💼, 💼 표시 아이콘). 저장 형식 `Sticker.packageName = "패키지@프로필번호"`(UserManager serial), 폴더 키 `sticker:패키지@번호`. 아이콘·이름·실행은 `TargetApps.iconOf/labelOfId/launch`(LauncherApps `getActivityList`·`startMainActivity`, 프로필이 일시 중지면 `requestQuietModeEnabled(false)`로 켜기 요청). 프로필이 꺼져 있을 땐 스티커를 지우지 않고 건너뜀. 재시작 앱(`rapp:`)·폰 최적화 등은 내 프로필 앱만.
 - 1.36.1 **화면이 완전히 켜졌을 때만 버튼 표시**: `buildAll()`이 `screenFullyOn()`(isInteractive && !isKeyguardLocked)이 아니면 버튼을 안 올림 → 화면 꺼짐·Always On Display·잠금화면에서 숨김(통화 중 잠금화면이면 통화 증폭 버튼만). SCREEN_OFF/SCREEN_ON/USER_PRESENT 리시버(`screenStateReceiver`)로 다시 그림. 화면 녹화 중 화면이 꺼지면 녹화는 원래대로 끝남.
 - 1.36.2 **통화 증폭 고침**(사용자: "계속 실패"): ① '추가 음량' 버튼을 통화 시작 20초만이 아니라 **통화 내내 통화 화면이 보일 때마다** 찾음(`callScreenVisible`), 라벨 후보 확대(`EXTRA_VOLUME_LABELS`) ② 3번 못 찾으면 통화 화면 '더보기(⋮)' 메뉴를 한 번 열어 그 안에서 찾고, 없으면 메뉴만 뒤로 닫음(`trySamsungExtraVolumeViaMenu`, 통화마다 1회) ③ 그래도 못 찾으면 통화 화면 버튼 글자(숫자 든 글자 제외)를 `Prefs.callBoostDebug`에 남겨 설정 카드에 표시(길게 복사) ④ **영상통화 제외**: `CameraManager.AvailabilityCallback`으로 카메라 사용 중이면 통화로 보지 않음(버튼·증폭 없음).
+- 1.37.2 **통화 증폭 = 스피커폰/이어폰 음량**(사용자: "갤럭시 기본기능 말고 너가 작동시켜봐"): 일반 전화 소리는 앱이 직접 키울 수 없음(통신 칩 경로)을 설명함. 켜면 이어폰(BT SCO·BLE·유선·USB) 연결 시 통화 음량 최대만, 아니면 **스피커폰 전환**(API31+ `setCommunicationDevice(BUILTIN_SPEAKER)`, 이하 `isSpeakerphoneOn`, 안 되면 접근성으로 통화 화면 '스피커' 버튼 `setCallSpeaker`) + 음량 최대. 끄거나 통화 끝나면 우리가 켠 스피커만 되돌림. 상태 초록 조건에 스피커·이어폰 추가. 삼성 '추가 음량'·증폭기는 그대로 같이 시도.
 
 ## 4. 기기 검증 상태 (중요)
 
@@ -109,7 +110,7 @@
 - **알림 지우기**는 지금 떠 있는 알림만 지움(알림 설정은 안 건드림). 상시 알림은 남음. 배민커넥트/쿠팡이츠의 새 주문 알림도 같이 지워진다고 안내함.
 - 안드로이드는 다른 앱 메모리를 직접 비우는 걸 허용하지 않아 "앱 종료"로만 가능 → 체감 효과 제한적, 재부팅이 가장 확실하다고 안내함.
 - 폰 최적화 선택 기능 B(삼성 기기 케어 연동)·C(자동 주기 실행)는 **사용자가 제외**함.
-- 통화 증폭은 기기에 따라 일반 전화에서 안 먹을 수 있어 삼성 '추가 음량' 자동 켜기를 같이 씀.
+- 통화 증폭: **일반 전화 소리는 앱이 직접 증폭 불가**(안드로이드가 막음, 사용자에게 설명함). 그래서 1.37.2부터 스피커폰 전환/이어폰 음량 최대 + 삼성 '추가 음량' 자동 켜기로 "크게 들리게" 함.
 
 ## 6. 다음에 할 만한 일 (사용자 요청 아님 — 필요 시 제안)
 

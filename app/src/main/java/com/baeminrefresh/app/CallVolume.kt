@@ -19,6 +19,10 @@ import android.os.SystemClock
  * 1.36.2: '추가 음량' 버튼을 통화 내내(통화 화면이 보일 때마다) 찾고, 안 보이면 '더보기' 메뉴에서 한 번 찾는다.
  *         못 찾으면 통화 화면 버튼 글자를 Prefs.callBoostDebug 에 남긴다(설정 카드에 표시).
  *         영상통화(카메라 사용 중)는 증폭하지 않는다.
+ * 1.37.2: 일반 전화 소리는 앱이 직접 키울 수 없으므로(통신 칩이 바로 내보냄) 실제로 크게 들리게 하는 쪽을 쓴다.
+ *         이어폰(블루투스·유선)이 연결돼 있으면 → 통화 음량 최대만(이어폰 쪽이 커짐).
+ *         없으면 → 스피커폰으로 전환(안드로이드 API, 안 되면 통화 화면 '스피커' 버튼을 대신 누름) + 음량 최대.
+ *         끄거나 통화가 끝나면 우리가 켠 스피커만 원래대로.
  */
 class CallVolume(private val service: RestartAccessibilityService) {
 
@@ -37,6 +41,10 @@ class CallVolume(private val service: RestartAccessibilityService) {
     private var extraVolumeOn = false
     private var extraTries = 0
     private var menuTried = false
+    private var headset = false
+    private var speakerOn = false
+    private var speakerByApi = false
+    private var speakerByScreen = false
     private var debugSaved = false
 
     // 영상통화 감지: 카메라를 어떤 앱이 쓰는 중이면 영상통화로 본다
@@ -121,11 +129,13 @@ class CallVolume(private val service: RestartAccessibilityService) {
                     }
                 }
             }
+            // 이어폰이 없으면 스피커폰으로 (통화 화면이 늦게 떠도 계속 시도)
+            if (!headset && !speakerOn) trySpeaker()
             measure()
         }
         val newStatus = when {
             !boostOn -> Status.OFF
-            extraVolumeOn || soundSeen -> Status.WORKING
+            headset || speakerOn || extraVolumeOn || soundSeen -> Status.WORKING
             SystemClock.uptimeMillis() - boostStartedAt < 6000L -> Status.CHECKING
             else -> Status.NOT_DETECTED
         }
@@ -149,6 +159,10 @@ class CallVolume(private val service: RestartAccessibilityService) {
         extraTries = 0
         menuTried = false
         debugSaved = false
+        speakerOn = false
+        speakerByApi = false
+        speakerByScreen = false
+        headset = hasHeadset()
         service.resetExtraVolumeMenuTry()
         val stream = AudioManager.STREAM_VOICE_CALL
         runCatching {
@@ -157,6 +171,66 @@ class CallVolume(private val service: RestartAccessibilityService) {
         }
         applyGain()
         startVisualizer()
+        if (!headset) trySpeaker()
+    }
+
+    /** 블루투스·유선 이어폰이 연결돼 있는지 */
+    private fun hasHeadset(): Boolean = runCatching {
+        am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                it.type == android.media.AudioDeviceInfo.TYPE_USB_HEADSET ||
+                (android.os.Build.VERSION.SDK_INT >= 31 && it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET)
+        }
+    }.getOrDefault(false)
+
+    private fun speakerActive(): Boolean = runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            am.communicationDevice?.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        } else {
+            @Suppress("DEPRECATION") am.isSpeakerphoneOn
+        }
+    }.getOrDefault(false)
+
+    /** 스피커폰 켜기: 이미 켜져 있으면 그대로, 아니면 API → 안 되면 통화 화면 '스피커' 버튼 */
+    private fun trySpeaker() {
+        if (speakerActive()) {
+            speakerOn = true
+            return
+        }
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                val spk = am.availableCommunicationDevices.firstOrNull {
+                    it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                }
+                if (spk != null) am.setCommunicationDevice(spk)
+            } else {
+                @Suppress("DEPRECATION")
+                am.isSpeakerphoneOn = true
+            }
+        }
+        if (speakerActive()) {
+            speakerOn = true
+            speakerByApi = true
+            return
+        }
+        if (service.callScreenVisible() && service.setCallSpeaker(true)) {
+            speakerOn = true
+            speakerByScreen = true
+        }
+    }
+
+    /** 우리가 켠 스피커만 원래(수화기)대로 */
+    private fun speakerOff() {
+        if (speakerByApi) runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice()
+            else @Suppress("DEPRECATION") { am.isSpeakerphoneOn = false }
+        }
+        if (speakerByScreen && isCallMode()) service.setCallSpeaker(false)
+        speakerOn = false
+        speakerByApi = false
+        speakerByScreen = false
     }
 
     private fun applyGain() {
@@ -173,6 +247,7 @@ class CallVolume(private val service: RestartAccessibilityService) {
         boostOn = false
         releaseEnhancer()
         stopVisualizer()
+        speakerOff()
         if (extraVolumeOn) {
             service.setSamsungExtraVolume(false) // 우리가 켠 것만 끈다
             extraVolumeOn = false

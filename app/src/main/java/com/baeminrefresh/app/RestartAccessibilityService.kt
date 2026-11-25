@@ -120,6 +120,28 @@ class RestartAccessibilityService : AccessibilityService() {
         }, 700L)
     }
 
+    /**
+     * 통화 화면의 '스피커' 버튼으로 스피커폰을 켜거나 끈다. 통화 화면이 보일 때만 가능.
+     * 켜짐 상태를 알 수 있으면 다를 때만 누른다. @return 원하는 상태로 만들었으면 true
+     */
+    fun setCallSpeaker(on: Boolean): Boolean {
+        for (r in callScreenRoots()) {
+            val node = findNode(r) { n ->
+                val t = listOfNotNull(n.text, n.contentDescription).joinToString(" ").replace(" ", "").lowercase()
+                n.isVisibleToUser && SPEAKER_LABELS.any { t.contains(it) } && !t.contains("블루투스") && !t.contains("bluetooth")
+            } ?: continue
+            var target: AccessibilityNodeInfo? = node
+            var depth = 0
+            while (target != null && !target.isClickable && depth < 4) { target = target.parent; depth++ }
+            val t = target ?: return false
+            val stateKnown = t.isCheckable || node.isCheckable
+            val isOn = t.isChecked || node.isChecked || t.isSelected || node.isSelected
+            if (stateKnown && isOn == on) return true
+            return t.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
+        return false
+    }
+
     fun setSamsungExtraVolume(on: Boolean): Boolean {
         for (r in callScreenRoots()) {
             val node = findNode(r) { isExtraVolumeNode(it) } ?: continue
@@ -1058,6 +1080,7 @@ class RestartAccessibilityService : AccessibilityService() {
         /** 마지막으로 재시작·강제 중지 단계를 밟은 시각(elapsedRealtime) — 꺼짐 방지가 우리 동작에 반응하지 않게 */
         @Volatile
         var lastBusyAt = 0L
+        private val SPEAKER_LABELS = listOf("스피커", "speaker")
         private val EXTRA_VOLUME_LABELS = listOf(
             "추가음량", "추가볼륨", "음량추가", "볼륨추가", "음량높이기", "볼륨높이기", "음량키우기",
             "음량증폭", "볼륨부스트", "extravolume", "volumeboost"
