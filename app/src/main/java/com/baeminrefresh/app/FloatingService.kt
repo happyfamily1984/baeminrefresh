@@ -60,6 +60,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         val reply: Boolean = false,
         /** 화면 녹화 버튼 (녹화 중에는 정지 버튼) */
         val screenRec: Boolean = false,
+        /** 볼륨 버튼: +1 = 볼륨 올리기, -1 = 볼륨 내리기, 0 = 아님 */
+        val volume: Int = 0,
     ) {
         /** 펼쳐진 폴더 안에 보이는 중이면 그 폴더 id (끌기 불가, 폴더 옆에 자동 배치) */
         var inFolder: Int = -1
@@ -75,6 +77,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             diary != null -> diary
             reply -> "reply"
             screenRec -> "screenrec"
+            volume > 0 -> "volup"
+            volume < 0 -> "voldown"
             restartPkg != null -> "rapp:$restartPkg"
             restart -> "main"
             launchPkg != null -> "sticker:$launchPkg"
@@ -249,7 +253,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
             Prefs.KEY_STICKERS -> rebuildStickers()
             Prefs.KEY_RESTART_APPS, Prefs.KEY_FOLDERS, Prefs.KEY_OPT_ENABLED -> buildAll()
-            Prefs.KEY_REPLY_ENABLED, Prefs.KEY_SCREENREC_ENABLED -> buildAll()
+            Prefs.KEY_REPLY_ENABLED, Prefs.KEY_SCREENREC_ENABLED, Prefs.KEY_VOLUME_ENABLED -> buildAll()
             Prefs.KEY_DIARY_ENABLED -> {
                 diaryAttach(prefs.diaryEnabled)
                 buildAll()
@@ -355,6 +359,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
         if (!waterOnly() && prefs.replyEnabled) addReplyBubble()
         if (!waterOnly() && prefs.screenRecEnabled) addScreenRecBubble()
+        if (!waterOnly() && prefs.volumeButtonsEnabled) {
+            addVolumeBubble(+1)
+            addVolumeBubble(-1)
+        }
         if (callBubbleWanted()) addCallBubble()
         layoutExpandedFolders()
         updatePeeState()
@@ -551,6 +559,58 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             startActivity(DiaryLink.activityIntent(open = kind))
         } catch (e: Exception) {
             toast(if (DiaryLink.isInstalled(this)) "일기장 앱을 열지 못했어요" else "일기장 앱이 설치되어 있지 않아요")
+        }
+    }
+
+    // ---------------- 볼륨 +/− 버튼 (실험실) ----------------
+    // 폰 옆 볼륨 키를 누른 것과 같다: 지금 소리 나는 쪽(통화 중이면 통화, 음악·영상이면 미디어, 아니면 기기 기본)을
+    // 한 칸 올리거나 내리고, 시스템 볼륨 창을 보여 준다.
+
+    private fun addVolumeBubble(dir: Int) {
+        val key = if (dir > 0) "volup" else "voldown"
+        if (bubbles.any { it.volume == dir } || hiddenByFolder(key)) return
+        val sizePx = dp(prefs.buttonSizeDp)
+        val b = Bubble(volume = dir)
+        b.iv = ImageView(this)
+        b.tv = TextView(this).apply {
+            text = if (dir > 0) "+" else "−"
+            setTextColor(0xFFFFFFFF.toInt())
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sizePx * 0.6f)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            maxLines = 1
+        }
+        b.frame = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(VOLUME_COLOR)
+                setStroke(dp(2), 0xFFFFFFFF.toInt())
+            }
+            elevation = dp(6).toFloat()
+            addView(b.iv, FrameLayout.LayoutParams(1, 1, Gravity.CENTER))
+            addView(b.tv, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER
+            ))
+        }
+        b.lp = newLayoutParams(sizePx)
+        b.frame.alpha = prefs.buttonAlpha / 100f
+        b.frame.setOnTouchListener(DragTouchListener(b))
+        bubbles.add(b)
+        addOverlayView(b)
+        val (sx, sy) = savedPosOf(b)
+        val (cx, cy) = resolveCollision(b, sx, sy)
+        clampAndApply(b, cx, cy)
+    }
+
+    private fun onVolumeTapped(dir: Int) {
+        val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        runCatching {
+            am.adjustSuggestedStreamVolume(
+                if (dir > 0) android.media.AudioManager.ADJUST_RAISE else android.media.AudioManager.ADJUST_LOWER,
+                android.media.AudioManager.USE_DEFAULT_STREAM_TYPE,
+                android.media.AudioManager.FLAG_SHOW_UI
+            )
         }
     }
 
@@ -963,6 +1023,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         }
         if (prefs.replyEnabled) add("reply")
         if (prefs.screenRecEnabled) add("screenrec")
+        if (prefs.volumeButtonsEnabled) {
+            add("volup")
+            add("voldown")
+        }
         if (Features.PEE && prefs.peeTrackerEnabled) add("pee")
     }
 
@@ -1069,6 +1133,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             key == "optimize" -> addOptimizeBubble()
             key == "reply" -> if (prefs.replyEnabled) addReplyBubble()
             key == "screenrec" -> if (prefs.screenRecEnabled) addScreenRecBubble()
+            key == "volup" -> if (prefs.volumeButtonsEnabled) addVolumeBubble(+1)
+            key == "voldown" -> if (prefs.volumeButtonsEnabled) addVolumeBubble(-1)
             key == DiaryLink.KIND_DIARY || key == DiaryLink.KIND_IDEA -> if (prefs.diaryEnabled) addDiaryBubble(key)
             key == "pee" -> addPeeBubble()
         }
@@ -2299,8 +2365,8 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             }
         } else if (b.callBoost) {
             // 글자만 있는 버튼
-        } else if (b.diary != null) {
-            b.tv?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sizePx * 0.45f)
+        } else if (b.diary != null || b.volume != 0) {
+            b.tv?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sizePx * (if (b.volume != 0) 0.6f else 0.45f))
         } else if (b.capture || b.voice || b.isFolder || b.optimize || b.reply || b.screenRec) {
             b.iv.layoutParams = FrameLayout.LayoutParams(sizePx * 3 / 5, sizePx * 3 / 5, Gravity.CENTER)
         } else {
@@ -2351,6 +2417,17 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                     val size = dp(prefs.buttonSizeDp)
                     val step = if (b.diary == DiaryLink.KIND_IDEA) size + dp(prefs.buttonGapDp) else 0
                     (w - size) to ((h * 0.2f).roundToInt() + step)
+                } else x to y
+            }
+            b.volume != 0 -> {
+                val key = if (b.volume > 0) "volup" else "voldown"
+                val (x, y) = prefs.diaryPos(key)
+                if (x < 0 || y < 0) {
+                    // 처음에는 오른쪽 벽에 + 위, − 바로 아래로 붙여서
+                    val (w, h) = screenSize()
+                    val size = dp(prefs.buttonSizeDp)
+                    val step = if (b.volume < 0) size + dp(prefs.buttonGapDp) else 0
+                    (w - size) to ((h * 0.35f).roundToInt() + step)
                 } else x to y
             }
             b.screenRec -> {
@@ -2588,6 +2665,10 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
                 prefs.replyEnabled = false
                 toast("답변 추천 버튼을 지웠어요")
             }
+            b.volume != 0 -> {
+                prefs.volumeButtonsEnabled = false
+                toast("볼륨 버튼을 지웠어요")
+            }
             b.screenRec -> {
                 if (screenRecording) stopScreenRec(null) // 녹화 중 정지 버튼은 길게 눌러도 끝내기
                 else {
@@ -2621,6 +2702,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.diary != null -> prefs.setDiaryPos(b.diary, x, y)
             b.reply -> prefs.setDiaryPos("reply", x, y)
             b.screenRec -> prefs.setDiaryPos("screenrec", x, y)
+            b.volume != 0 -> prefs.setDiaryPos(if (b.volume > 0) "volup" else "voldown", x, y)
             b.optimize -> {
                 prefs.optPosX = x
                 prefs.optPosY = y
@@ -2772,11 +2854,13 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
             b.diary != null -> onDiaryTapped(b.diary)
             b.reply -> onReplyTapped()
             b.screenRec -> onScreenRecTapped()
+            b.volume != 0 -> onVolumeTapped(b.volume)
             b.isRestart -> onRestartTapped(b)
             else -> launchApp(b.launchPkg!!)
         }
         // 폴더에서 꺼낸 버튼을 눌렀으면 폴더를 다시 닫는다 (음성 입력은 녹음 중이라 열어 둠)
-        if (b.inFolder >= 0 && !b.voice && b.diary == null) collapseFolder(b.inFolder)
+        // (볼륨 버튼은 여러 번 누르니까 폴더를 열어 둔다)
+        if (b.inFolder >= 0 && !b.voice && b.diary == null && b.volume == 0) collapseFolder(b.inFolder)
     }
 
     private fun openMainApp() {
@@ -2891,6 +2975,7 @@ class FloatingService : Service(), SharedPreferences.OnSharedPreferenceChangeLis
         const val EXTRA_REC_DATA = "rec_data"
         private const val REC_CHANNEL_ID = "screen_rec"
         private const val REC_SAVED_NOTIFICATION_ID = 3
+        private val VOLUME_COLOR = 0xFF4B5BA6.toInt() // 볼륨 버튼: 남색
         private val REC_COLOR = 0xFF3A3F47.toInt() // 화면 녹화 버튼: 짙은 회색
         private const val LONG_PRESS_MS = 600L
         private const val FOLDER_DISSOLVE_MS = 1500L // 폴더는 이만큼 눌러야 풀린다

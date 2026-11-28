@@ -124,6 +124,7 @@ class MainActivity : AppCompatActivity() {
         setupReply()
         setupKeepAlive()
         setupScreenRec()
+        setupVolumeButtons()
 
         if (Features.PEE) {
             findViewById<View>(R.id.pee_card).visibility = View.VISIBLE
@@ -753,6 +754,10 @@ class MainActivity : AppCompatActivity() {
         if (prefs.optimizeEnabled) items += "optimize" to "폰 최적화"
         if (prefs.replyEnabled) items += "reply" to "💬 답변 추천"
         if (prefs.screenRecEnabled) items += "screenrec" to "⏺ 화면 녹화"
+        if (prefs.volumeButtonsEnabled) {
+            items += "volup" to "🔊 볼륨 +"
+            items += "voldown" to "🔉 볼륨 −"
+        }
         if (prefs.diaryEnabled) {
             items += DiaryLink.KIND_DIARY to "📖 일기 쓰기"
             items += DiaryLink.KIND_IDEA to "💡 아이디어 쓰기"
@@ -815,6 +820,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------------- 화면 녹화 (실험실) ----------------
+
+    private fun setupVolumeButtons() {
+        val sw = findViewById<MaterialSwitch>(R.id.volume_switch)
+        sw.isChecked = prefs.volumeButtonsEnabled
+        sw.setOnCheckedChangeListener { _, checked ->
+            prefs.volumeButtonsEnabled = checked
+            if (checked && !FloatingService.isRunning) {
+                Toast.makeText(this, "위에서 '플로팅 버튼 표시'를 켜면 + / − 버튼이 나타나요", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     private fun setupScreenRec() {
         val sw = findViewById<MaterialSwitch>(R.id.screenrec_switch)

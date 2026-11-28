@@ -207,6 +207,13 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_REPLY_PASSWORD, "") ?: ""
         set(value) = sp.edit().putString(KEY_REPLY_PASSWORD, value).apply()
 
+    // ---------------- 볼륨 +/− 버튼 (실험실) ----------------
+
+    /** 켜면 플로팅 + / − 볼륨 버튼 두 개가 뜬다 */
+    var volumeButtonsEnabled: Boolean
+        get() = sp.getBoolean(KEY_VOLUME_ENABLED, false)
+        set(value) = sp.edit().putBoolean(KEY_VOLUME_ENABLED, value).apply()
+
     // ---------------- 화면 녹화 (실험실) ----------------
 
     /** 켜면 플로팅 ⏺ 화면 녹화 버튼이 뜬다 */
@@ -438,7 +445,8 @@ class Prefs(context: Context) {
         key == "voice" -> voicePosX to voicePosY
         key == "pee" -> peePosX to peePosY
         key == "optimize" -> optPosX to optPosY
-        key == "diary" || key == "idea" || key == "reply" || key == "screenrec" -> diaryPos(key)
+        key == "diary" || key == "idea" || key == "reply" || key == "screenrec" ||
+            key == "volup" || key == "voldown" -> diaryPos(key)
         key.startsWith("rapp:") -> getRestartApps().firstOrNull { it.packageName == key.removePrefix("rapp:") }
             ?.let { it.x to it.y } ?: (-1 to -1)
         key.startsWith("sticker:") -> getStickers().firstOrNull { it.packageName == key.removePrefix("sticker:") }
@@ -453,7 +461,8 @@ class Prefs(context: Context) {
             key == "voice" -> { voicePosX = x; voicePosY = y }
             key == "pee" -> { peePosX = x; peePosY = y }
             key == "optimize" -> { optPosX = x; optPosY = y }
-            key == "diary" || key == "idea" || key == "reply" || key == "screenrec" -> setDiaryPos(key, x, y)
+            key == "diary" || key == "idea" || key == "reply" || key == "screenrec" ||
+                key == "volup" || key == "voldown" -> setDiaryPos(key, x, y)
             key.startsWith("rapp:") -> updateRestartAppPosition(key.removePrefix("rapp:"), x, y)
             key.startsWith("sticker:") -> updateStickerPosition(key.removePrefix("sticker:"), x, y)
         }
@@ -479,6 +488,7 @@ class Prefs(context: Context) {
         const val KEY_REPLY_ENABLED = "lab_reply_enabled"
         const val KEY_KEEPALIVE_ENABLED = "lab_keepalive_enabled"
         const val KEY_SCREENREC_ENABLED = "lab_screenrec_enabled"
+        const val KEY_VOLUME_ENABLED = "lab_volume_enabled"
         const val KEY_REPLY_PASSWORD = "lab_reply_password"
         const val KEY_OPT_ADD = "opt_protect_add"
         const val KEY_OPT_REMOVE = "opt_protect_remove"

@@ -1,6 +1,6 @@
 # 배민리프레시 — 새 세션 인수인계
 
-현재 버전: **1.37.3 (versionCode 74)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
+현재 버전: **1.38.0 (versionCode 75)** · 패키지 `com.baeminrefresh.app` · minSdk 26 / targetSdk 35 · Kotlin · View 기반(Compose 아님)
 
 ## 0. 먼저 읽기 — 사용자와 일하는 방식
 
@@ -49,7 +49,7 @@
 ### 꼭 알아둘 설계 규칙
 
 - **스티커 앱 아이디**: 일반 `패키지` · 다른 프로필(업무) `패키지@프로필번호` · **멀티로그인 개인용 복제본 `mlp:<가상사용자번호>:<패키지>`**(1.37.0). 복제본 목록은 `content://com.happyfamily1984.multilogin.personal.clones`(열 pkg/user/title), 실행은 그 앱의 `ShortcutLaunchActivity`(extra `pkg`, `user`). 코드는 `TargetApps.isClone/cloneApps/launchClone`.
-- **버튼 키 체계(폴더용)**: `"main"`(기본 재시작) · `"rapp:<pkg>"` · `"sticker:<pkg>"` · `"capture"` · `"voice"` · `"pee"` · `"optimize"` · `"diary"` · `"idea"`(일기장 쓰기) · `"reply"`(답변 추천) · `"screenrec"`(화면 녹화). 통화 증폭 버튼(`callBoost`)은 통화 중에만 뜨는 임시 버튼이라 폴더 불가. 새 버튼을 추가하면 `Bubble.key`, `validFolderKeys()`, `addBubbleByKey()`, `Prefs.savedPosOfKey/setSavedPosOfKey`, `savedPosOf`, `savePositionAt`, `onBubbleTapped`, `onLongPress`, `applyAppearance`, `buildAll`, 폴더 만들기 목록(`MainActivity.showFolderCreator`)을 모두 손봐야 한다.
+- **버튼 키 체계(폴더용)**: `"main"`(기본 재시작) · `"rapp:<pkg>"` · `"sticker:<pkg>"` · `"capture"` · `"voice"` · `"pee"` · `"optimize"` · `"diary"` · `"idea"`(일기장 쓰기) · `"reply"`(답변 추천) · `"screenrec"`(화면 녹화) · `"volup"` · `"voldown"`(볼륨 버튼). 통화 증폭 버튼(`callBoost`)은 통화 중에만 뜨는 임시 버튼이라 폴더 불가. 새 버튼을 추가하면 `Bubble.key`, `validFolderKeys()`, `addBubbleByKey()`, `Prefs.savedPosOfKey/setSavedPosOfKey`, `savedPosOf`, `savePositionAt`, `onBubbleTapped`, `onLongPress`, `applyAppearance`, `buildAll`, 폴더 만들기 목록(`MainActivity.showFolderCreator`)을 모두 손봐야 한다.
 - **재진입 주의**: prefs 리스너(`onSharedPreferenceChanged`)는 메인 스레드에서 **동기**로 `buildAll()`을 부른다. `buildAll()` 안에서 prefs를 쓰면 중첩 재구성이 일어나므로, 정리 저장은 `peeHandler.post{}`로 미룬다(`refreshFolders` 참고).
 - **폴더**: 닫힌 폴더의 멤버는 `hiddenByFolder(key)`로 각 `addXxxBubble()` 맨 앞에서 건너뜀. 펼치면 멤버 버블을 만들고 `layoutFolder()`가 폴더 바로 아래(공간 없으면 위)에 세로로 세움. 펼친 멤버는 `inFolder>=0`이라 위치 저장 안 함, 세로로만 끌어 순서 변경(`reorderFolderMember`). 폴더 탭 0.28초 지연 후 더블탭 판정. 길게 0.6초=반응, 1.5초=폴더 풀기(`dissolveFolder`).
 - **오버레이**: 접근성 연결 시 `TYPE_ACCESSIBILITY_OVERLAY`(통화 화면 위에도 보임), 아니면 `TYPE_APPLICATION_OVERLAY`. `refreshOverlayType()`.
@@ -89,6 +89,7 @@
 - 1.36.1 **화면이 완전히 켜졌을 때만 버튼 표시**: `buildAll()`이 `screenFullyOn()`(isInteractive && !isKeyguardLocked)이 아니면 버튼을 안 올림 → 화면 꺼짐·Always On Display·잠금화면에서 숨김(통화 중 잠금화면이면 통화 증폭 버튼만). SCREEN_OFF/SCREEN_ON/USER_PRESENT 리시버(`screenStateReceiver`)로 다시 그림. 화면 녹화 중 화면이 꺼지면 녹화는 원래대로 끝남.
 - 1.36.2 **통화 증폭 고침**(사용자: "계속 실패"): ① '추가 음량' 버튼을 통화 시작 20초만이 아니라 **통화 내내 통화 화면이 보일 때마다** 찾음(`callScreenVisible`), 라벨 후보 확대(`EXTRA_VOLUME_LABELS`) ② 3번 못 찾으면 통화 화면 '더보기(⋮)' 메뉴를 한 번 열어 그 안에서 찾고, 없으면 메뉴만 뒤로 닫음(`trySamsungExtraVolumeViaMenu`, 통화마다 1회) ③ 그래도 못 찾으면 통화 화면 버튼 글자(숫자 든 글자 제외)를 `Prefs.callBoostDebug`에 남겨 설정 카드에 표시(길게 복사) ④ **영상통화 제외**: `CameraManager.AvailabilityCallback`으로 카메라 사용 중이면 통화로 보지 않음(버튼·증폭 없음).
 - 1.37.2→1.37.3 통화 증폭을 스피커폰 전환/이어폰 음량 방식으로 바꿨다가 **사용자가 "둘 다 별로, 막힌 걸 뚫지 않는 이상"이라 해서 되돌림**(1.37.3 = 1.37.1과 같은 동작). 일반 전화 소리를 앱이 직접 증폭하는 건 루팅 없이는 불가 → 다시 제안하지 말 것. 스피커폰 자동 전환도 원하지 않음.
+- 1.38.0 실험실 **볼륨 + / − 버튼**(남색, 글자 "+"·"−"): `Bubble.volume`(+1/−1), 키 `volup`/`voldown`, 위치는 `Prefs.diaryPos("volup"/"voldown")`, 처음엔 오른쪽 벽 높이 35%에 + 위·− 아래로 붙여 배치. 탭 = `adjustSuggestedStreamVolume(ADJUST_RAISE/LOWER, USE_DEFAULT_STREAM_TYPE, FLAG_SHOW_UI)`(하드웨어 볼륨 키와 같은 동작), 길게 = 둘 다 지움(토글 끔). 폴더 안에서 눌러도 폴더를 닫지 않음(연속으로 누르게).
 
 ## 4. 기기 검증 상태 (중요)
 
@@ -103,6 +104,7 @@
   8. **배민커넥트 꺼짐 방지(1.32.0)**: 배민커넥트가 운행 중 상시 알림(포그라운드 서비스)을 쓰는지(안 쓰면 ②는 못 알아챔), 실제로 꺼졌을 때 다시 켜지고 복귀하는지, 엉뚱하게 다시 켜는 일은 없는지, 삼성 절전 예외 버튼이 열리는지.
   9. **화면 녹화(1.35.0)**: 허용 → 버튼 숨김 → 녹화 → 알림/화면 끄기로 종료 → 갤러리 저장·재생, 마이크 옵션, 정지 버튼 옵션, 안드로이드 14+ "앱 하나만 녹화" 선택 시 동작.
   10. **멀티 프로필 스티커(1.36.0)**: 업무 탭 앱이 목록에 나오는지, 스티커 탭으로 업무 앱이 열리는지, 폴더에 넣기.
+  11. **볼륨 버튼(1.38.0)**: 음악·통화·평소에 각각 맞는 소리가 조절되는지, 볼륨 창이 뜨는지, 위아래 붙이기·폴더.
   7. **답변 추천(1.30.0~1.31.0)**: 스레드 답글 화면에서 상대 글만 정확히 읽히는지·접힌 답글 칸이 펼쳐져 입력되는지, 텔레그램/카톡에서 대화가 제대로 읽히는지(특히 텔레그램은 말풍선을 직접 그려서 접근성 글자가 다를 수 있음), 나/상대 구분, 입력창 교체, 답변 품질·속도, 실패 시 토스트 문구.
 
 ### 휴대폰 교체 후 다시 할 일 (2026-11 사용자 폰 교체 예정)
